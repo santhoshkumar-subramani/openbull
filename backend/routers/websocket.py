@@ -43,20 +43,34 @@ router = APIRouter(prefix="/api/websocket", tags=["websocket"])
 async def websocket_config(request: Request, user: User = Depends(get_current_user)):
     """Return the broker WebSocket proxy URL.
 
-    Upgrades ``ws://`` to ``wss://`` when the caller's page is itself served
-    over HTTPS, so mixed-content errors don't break the browser client.
+    Derives a browser-reachable URL from ``settings.frontend_url`` so the
+    returned address goes through the public domain (NPM → Vite → uvicorn
+    bridge → standalone proxy) rather than exposing the server-internal
+    loopback address (127.0.0.1:8765) which the browser cannot reach.
     """
     settings = get_settings()
-    url = settings.websocket_url
     is_secure = (
         request.url.scheme == "https"
         or request.headers.get("x-forwarded-proto", "").lower() == "https"
     )
-    if is_secure and url.startswith("ws://"):
-        url = "wss://" + url[len("ws://") :]
+
+    # Build a browser-reachable URL from frontend_url.
+    # e.g. "https://openbull.santhoshvps.org" → "wss://openbull.santhoshvps.org/ws/"
+    #      "http://localhost:5173"             → "ws://localhost:5173/ws/"
+    frontend = settings.frontend_url.rstrip("/")
+    if frontend.startswith("https://"):
+        ws_url = "wss://" + frontend[len("https://"):] + "/ws/"
+    elif frontend.startswith("http://"):
+        ws_url = "ws://" + frontend[len("http://"):] + "/ws/"
+    else:
+        # Fallback: use raw setting and upgrade scheme if needed
+        ws_url = settings.websocket_url
+        if is_secure and ws_url.startswith("ws://"):
+            ws_url = "wss://" + ws_url[len("ws://"):]
+
     return {
         "status": "success",
-        "websocket_url": url,
+        "websocket_url": ws_url,
         "original_url": settings.websocket_url,
         "is_secure": is_secure,
     }

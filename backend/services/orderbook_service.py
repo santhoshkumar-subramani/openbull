@@ -96,7 +96,7 @@ def get_orderbook_with_auth(
         return False, {"status": "error", "message": "Broker-specific module not found"}, 404
 
     try:
-        order_data = broker_funcs["get_order_book"](auth_token)
+        order_data = broker_funcs["get_order_book"](auth_token, config)
 
         if isinstance(order_data, dict) and order_data.get("status") == "error":
             return (

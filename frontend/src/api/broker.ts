@@ -1,6 +1,7 @@
 import api from "@/config/api";
 import type {
   AngelLoginPayload,
+  ShoonyaLoginPayload,
   BrokerListItem,
   BrokerConfigData,
   BrokerConfigResponse,
@@ -37,5 +38,11 @@ export async function getBrokerRedirectUrl(broker: string): Promise<BrokerRedire
 
 export async function angelLogin(payload: AngelLoginPayload): Promise<{ status: string; broker: string }> {
   const response = await api.post<{ status: string; broker: string }>("/angel/login", payload);
+  return response.data;
+}
+
+
+export async function shoonyaLogin(payload: ShoonyaLoginPayload): Promise<{ status: string; broker: string }> {
+  const response = await api.post<{ status: string; broker: string }>("/shoonya/login", payload);
   return response.data;
 }

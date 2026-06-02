@@ -6,5 +6,5 @@
     "supported_exchanges": ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     "broker_type": "IN_stock",
     "oauth_type": "oauth",
-    "auth_url_template": "https://api.shoonya.com/OAuthlogin/authorize/oauth?client_id={api_key}"
+    "auth_url_template": "https://trade.shoonya.com/OAuthlogin/authorize/oauth?client_id={api_key}"
 }

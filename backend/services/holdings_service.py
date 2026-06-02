@@ -76,7 +76,7 @@ def get_holdings_with_auth(
         return False, {"status": "error", "message": "Broker-specific module not found"}, 404
 
     try:
-        holdings = broker_funcs["get_holdings"](auth_token)
+        holdings = broker_funcs["get_holdings"](auth_token, config)
 
         if isinstance(holdings, dict) and holdings.get("status") == "error":
             return (

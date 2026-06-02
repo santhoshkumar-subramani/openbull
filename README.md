@@ -319,6 +319,7 @@ Selected — see `.env.example` for the full list.
 
 ```bash
 cd frontend && npm run build && cd ..
+npm run dev -- --host
 uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 

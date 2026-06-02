@@ -44,12 +44,7 @@ def _frontend_url_for_request(request: Request) -> str:
     redirect. Falls back to settings.frontend_url when the request has no
     parseable hostname.
     """
-    parsed = urlparse(settings.frontend_url)
-    request_hostname = request.url.hostname
-    if not request_hostname:
-        return settings.frontend_url
-    netloc = f"{request_hostname}:{parsed.port}" if parsed.port else request_hostname
-    return urlunparse((parsed.scheme, netloc, "", "", "", "")).rstrip("/")
+    return settings.frontend_url.rstrip("/")
 
 
 @router.get("/auth/broker-redirect")
@@ -196,6 +191,21 @@ async def dhan_callback(
 
     state = request.query_params.get("state")
     return await _handle_oauth_callback("dhan", token_id, request, response, db, state=state)
+
+
+@router.get("/shoonya/callback")
+async def shoonya_callback(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Handle Shoonya OAuth callback."""
+    code = request.query_params.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    state = request.query_params.get("state")
+    return await _handle_oauth_callback("shoonya", code, request, response, db, state=state)
 
 
 @router.post("/angel/login")

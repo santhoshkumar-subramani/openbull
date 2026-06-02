@@ -30,7 +30,7 @@ export function Select({
     <SelectPrimitive.Root
       value={value}
       defaultValue={defaultValue}
-      onValueChange={onValueChange}
+      onValueChange={onValueChange ? (v) => onValueChange(v as string) : undefined}
       disabled={disabled}
     >
       {children}

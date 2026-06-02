@@ -173,10 +173,12 @@ async def get_broker_context(
     broker_cfg = result.scalar_one_or_none()
     config = {}
     if broker_cfg:
+        extra = broker_cfg.extra_config or {}
         config = {
             "api_key": decrypt_value(broker_cfg.api_key),
             "api_secret": decrypt_value(broker_cfg.api_secret),
             "redirect_url": broker_cfg.redirect_url,
+            "client_id": extra.get("client_id", ""),
         }
 
     await cache_set_json(
@@ -265,10 +267,12 @@ async def get_api_user(
     broker_cfg = result.scalar_one_or_none()
     config = {}
     if broker_cfg:
+        extra = broker_cfg.extra_config or {}
         config = {
             "api_key": decrypt_value(broker_cfg.api_key),
             "api_secret": decrypt_value(broker_cfg.api_secret),
             "redirect_url": broker_cfg.redirect_url,
+            "client_id": extra.get("client_id", ""),
         }
 
     await cache_set_json(

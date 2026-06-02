@@ -227,7 +227,7 @@ function LegCard({
           <div className="space-y-1.5">
             <Label className="text-xs uppercase">Expiry</Label>
             <select
-              value={leg.expiry}
+              value={leg.expiry ?? undefined}
               onChange={(e) => update("expiry", e.target.value as ExpiryRank)}
               className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             >
@@ -1636,7 +1636,7 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
           onOpenChange={(o) => !o && setStrikePickerLegIndex(null)}
           underlying={underlying}
           underlyingExchange={underlyingExchange}
-          expiryRank={legs[strikePickerLegIndex].expiry}
+          expiryRank={legs[strikePickerLegIndex].expiry ?? "current"}
           optionType={legs[strikePickerLegIndex].option_type ?? "CE"}
           selectedStrike={legs[strikePickerLegIndex].strike_value ?? null}
           onPick={(strike) => {

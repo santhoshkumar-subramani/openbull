@@ -53,7 +53,7 @@ _ORDER_STATUS_MAP = {
 
 # ---- Order book ----
 
-def map_order_data(order: dict, broker: str = "shoonya") -> dict:
+def _map_single_order(order: dict, broker: str = "shoonya") -> dict:
     """Map a single Shoonya order dict to OpenBull format."""
     exchange = order.get("exch", "")
     brsymbol = order.get("tsym", "")
@@ -76,26 +76,60 @@ def map_order_data(order: dict, broker: str = "shoonya") -> dict:
         "symbol": symbol,
         "exchange": exchange,
         "action": action,
-        "quantity": order.get("qty", "0"),
-        "price": order.get("prc", "0"),
-        "trigger_price": order.get("trgprc", "0"),
+        "quantity": int(order.get("qty", 0) or 0),
+        "price": float(order.get("prc", 0) or 0),
+        "trigger_price": float(order.get("trgprc", 0) or 0),
         "order_type": order_type,
         "product": product,
         "status": status,
         "timestamp": order.get("norentm", ""),
-        "filled_quantity": order.get("fillshares", "0"),
-        "average_price": order.get("avgprc", "0"),
+        "filled_quantity": int(order.get("fillshares", 0) or 0),
+        "average_price": float(order.get("avgprc", 0) or 0),
         "broker": broker,
     }
 
 
-def transform_order_data(orders: list | dict) -> list:
-    """Transform a list (or error dict) from Shoonya OrderBook to OpenBull list."""
-    if not orders or (isinstance(orders, dict) and orders.get("stat") == "Not_Ok"):
+def map_order_data(order_data: list | dict, broker: str = "shoonya") -> list[dict]:
+    """Map the full Shoonya OrderBook response to a list of OpenBull order dicts."""
+    if not order_data or (isinstance(order_data, dict) and order_data.get("stat") == "Not_Ok"):
         return []
-    if isinstance(orders, dict):
-        orders = [orders]
-    return [map_order_data(o) for o in orders if isinstance(o, dict)]
+    if isinstance(order_data, dict):
+        order_data = [order_data]
+    return [_map_single_order(o, broker) for o in order_data if isinstance(o, dict)]
+
+
+def calculate_order_statistics(order_data: list[dict]) -> dict:
+    """Calculate buy/sell/status counts from mapped order data."""
+    total_buy_orders = total_sell_orders = 0
+    total_completed_orders = total_open_orders = total_rejected_orders = 0
+
+    for order in order_data:
+        action = order.get("action", "")
+        if action == "BUY":
+            total_buy_orders += 1
+        elif action == "SELL":
+            total_sell_orders += 1
+
+        status = order.get("status", "")
+        if status == "complete":
+            total_completed_orders += 1
+        elif status == "open":
+            total_open_orders += 1
+        elif status == "rejected":
+            total_rejected_orders += 1
+
+    return {
+        "total_buy_orders": total_buy_orders,
+        "total_sell_orders": total_sell_orders,
+        "total_completed_orders": total_completed_orders,
+        "total_open_orders": total_open_orders,
+        "total_rejected_orders": total_rejected_orders,
+    }
+
+
+def transform_order_data(orders: list) -> list:
+    """Pass-through — data is already mapped by map_order_data."""
+    return orders if isinstance(orders, list) else []
 
 
 # ---- Trade book ----
@@ -111,7 +145,7 @@ def _parse_shoonya_timestamp(ts_str: str) -> str:
         return ts_str
 
 
-def map_trade_data(trade: dict, broker: str = "shoonya") -> dict:
+def _map_single_trade(trade: dict, broker: str = "shoonya") -> dict:
     """Map a single Shoonya trade dict to OpenBull format."""
     exchange = trade.get("exch", "")
     brsymbol = trade.get("tsym", "")
@@ -129,21 +163,26 @@ def map_trade_data(trade: dict, broker: str = "shoonya") -> dict:
         "symbol": symbol,
         "exchange": exchange,
         "action": action,
-        "quantity": trade.get("flqty", "0"),
-        "price": trade.get("flprc", "0"),
+        "quantity": int(trade.get("flqty", 0) or 0),
+        "price": float(trade.get("flprc", 0) or 0),
         "product": product,
         "timestamp": _parse_shoonya_timestamp(trade.get("fltm", "")),
         "broker": broker,
     }
 
 
-def transform_tradebook_data(trades: list | dict) -> list:
-    """Transform Shoonya TradeBook response to OpenBull list."""
-    if not trades or (isinstance(trades, dict) and trades.get("stat") == "Not_Ok"):
+def map_trade_data(trade_data: list | dict, broker: str = "shoonya") -> list[dict]:
+    """Map the full Shoonya TradeBook response to a list of OpenBull trade dicts."""
+    if not trade_data or (isinstance(trade_data, dict) and trade_data.get("stat") == "Not_Ok"):
         return []
-    if isinstance(trades, dict):
-        trades = [trades]
-    return [map_trade_data(t) for t in trades if isinstance(t, dict)]
+    if isinstance(trade_data, dict):
+        trade_data = [trade_data]
+    return [_map_single_trade(t, broker) for t in trade_data if isinstance(t, dict)]
+
+
+def transform_tradebook_data(trades: list) -> list:
+    """Pass-through — data is already mapped by map_trade_data."""
+    return trades if isinstance(trades, list) else []
 
 
 # ---- Positions ----
@@ -173,12 +212,12 @@ def map_position_data(pos: dict, broker: str = "shoonya") -> dict:
         "symbol": symbol,
         "exchange": exchange,
         "product": product,
-        "quantity": str(net_qty),
-        "average_price": str(avg_price),
-        "ltp": str(ltp),
-        "pnl": str(pnl),
-        "realized_pnl": str(realized_pnl),
-        "unrealized_pnl": str(unrealized_pnl),
+        "quantity": net_qty,
+        "average_price": round(avg_price, 2),
+        "ltp": round(ltp, 2),
+        "pnl": pnl,
+        "realized_pnl": realized_pnl,
+        "unrealized_pnl": unrealized_pnl,
         "broker": broker,
     }
 
@@ -194,7 +233,7 @@ def transform_positions_data(positions: list | dict) -> list:
 
 # ---- Holdings ----
 
-def map_portfolio_data(holding: dict, broker: str = "shoonya") -> dict:
+def _map_single_holding(holding: dict, broker: str = "shoonya") -> dict:
     """Map a single Shoonya holding to OpenBull format."""
     exchange = holding.get("exch", "NSE")
     brsymbol = holding.get("tsym", "")
@@ -207,22 +246,50 @@ def map_portfolio_data(holding: dict, broker: str = "shoonya") -> dict:
     return {
         "symbol": symbol,
         "exchange": exchange,
-        "quantity": str(quantity),
-        "average_price": holding.get("upldprc", "0"),
-        "ltp": holding.get("lp", "0"),
+        "quantity": quantity,
+        "average_price": float(holding.get("upldprc", 0) or 0),
+        "ltp": float(holding.get("lp", 0) or 0),
         "product": "CNC",
         "broker": broker,
     }
 
 
-def transform_holdings_data(holdings: list | dict) -> list:
-    """Transform Shoonya Holdings response to OpenBull list."""
-    if not holdings or (isinstance(holdings, dict) and holdings.get("stat") == "Not_Ok"):
+def map_portfolio_data(holdings_data: list | dict, **kwargs) -> list[dict]:
+    """Map the full Shoonya Holdings response to a list of OpenBull holding dicts."""
+    if not holdings_data or (isinstance(holdings_data, dict) and holdings_data.get("stat") == "Not_Ok"):
         return []
-    if isinstance(holdings, dict):
-        # Holdings response wraps data in "hldvl" key
-        items = holdings.get("hldvl", [])
+    if isinstance(holdings_data, dict):
+        items = holdings_data.get("hldvl", [])
         if not items:
             return []
-        return [map_portfolio_data(h) for h in items if isinstance(h, dict)]
-    return [map_portfolio_data(h) for h in holdings if isinstance(h, dict)]
+        holdings_data = items
+    return [_map_single_holding(h) for h in holdings_data if isinstance(h, dict)]
+
+
+def calculate_portfolio_statistics(holdings_data: list[dict]) -> dict:
+    """Calculate portfolio totals from mapped holdings data."""
+    if not isinstance(holdings_data, list):
+        holdings_data = []
+
+    totalinvvalue = sum(
+        float(h.get("average_price") or 0) * int(h.get("quantity") or 0)
+        for h in holdings_data
+    )
+    totalholdingvalue = sum(
+        float(h.get("ltp") or 0) * int(h.get("quantity") or 0)
+        for h in holdings_data
+    )
+    totalprofitandloss = totalholdingvalue - totalinvvalue
+    totalpnlpercentage = (totalprofitandloss / totalinvvalue * 100) if totalinvvalue else 0.0
+
+    return {
+        "totalholdingvalue": totalholdingvalue,
+        "totalinvvalue": totalinvvalue,
+        "totalprofitandloss": totalprofitandloss,
+        "totalpnlpercentage": totalpnlpercentage,
+    }
+
+
+def transform_holdings_data(holdings: list) -> list:
+    """Pass-through — data is already mapped by map_portfolio_data."""
+    return holdings if isinstance(holdings, list) else []

@@ -40,4 +40,5 @@ dependencies = [
     "redis>=5.0",
     "limits[redis]>=3.0",
     "apscheduler>=3.10",
+    "pyotp>=2.9.0",
 ]

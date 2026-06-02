@@ -72,7 +72,7 @@ def get_tradebook_with_auth(
         return False, {"status": "error", "message": "Broker-specific module not found"}, 404
 
     try:
-        trade_data = broker_funcs["get_trade_book"](auth_token)
+        trade_data = broker_funcs["get_trade_book"](auth_token, config)
 
         if isinstance(trade_data, dict) and trade_data.get("status") == "error":
             return (

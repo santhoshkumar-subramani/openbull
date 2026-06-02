@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -312,3 +312,40 @@ app.include_router(playground_router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "OpenBull", "version": "0.1.0"}
+
+
+# WebSocket bridge: browser → /ws/ → standalone proxy on settings.websocket_port
+# Keeps the internal proxy on a loopback port while exposing it through the
+# public domain via the same HTTPS/NPM/Vite chain.
+@app.websocket("/ws/")
+async def websocket_market_bridge(ws: WebSocket):
+    import websockets as _ws_lib
+    await ws.accept()
+    proxy_url = f"ws://{settings.websocket_host}:{settings.websocket_port}"
+
+    async def _relay(src, dst, is_fastapi_src: bool):
+        try:
+            while True:
+                if is_fastapi_src:
+                    data = await src.receive_text()
+                    await dst.send(data)
+                else:
+                    data = await src.recv()
+                    await dst.send_text(data)
+        except (WebSocketDisconnect, _ws_lib.ConnectionClosed, Exception):
+            pass
+
+    try:
+        async with _ws_lib.connect(proxy_url) as upstream:
+            t1 = asyncio.create_task(_relay(ws, upstream, True))
+            t2 = asyncio.create_task(_relay(upstream, ws, False))
+            done, pending = await asyncio.wait([t1, t2], return_when=asyncio.FIRST_COMPLETED)
+            for t in pending:
+                t.cancel()
+    except Exception:
+        pass
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass

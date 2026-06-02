@@ -60,11 +60,11 @@ def get_margin_data(auth_token: str, config: dict | None = None) -> dict:
         m2m_unrealized = float(data.get("unmtom", 0) or 0)
 
         return {
-            "availablecash": f"{available_cash:.2f}",
-            "collateral": f"{collateral:.2f}",
-            "m2munrealized": f"{m2m_unrealized:.2f}",
-            "m2mrealized": f"{m2m_realized:.2f}",
-            "utiliseddebits": f"{used_margin:.2f}",
+            "availablecash": round(available_cash, 2),
+            "collateral": round(collateral, 2),
+            "m2munrealized": round(m2m_unrealized, 2),
+            "m2mrealized": round(m2m_realized, 2),
+            "utiliseddebits": round(used_margin, 2),
         }
     except (KeyError, TypeError, ValueError) as e:
         logger.error("Error processing Shoonya funds data: %s", e)

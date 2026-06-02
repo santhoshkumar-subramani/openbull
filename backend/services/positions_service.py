@@ -72,7 +72,7 @@ def get_positions_with_auth(
         return False, {"status": "error", "message": "Broker-specific module not found"}, 404
 
     try:
-        positions_data = broker_funcs["get_positions"](auth_token)
+        positions_data = broker_funcs["get_positions"](auth_token, config)
 
         if isinstance(positions_data, dict) and positions_data.get("status") == "error":
             return (
@@ -81,7 +81,6 @@ def get_positions_with_auth(
                 500,
             )
 
-        positions_data = broker_funcs["map_position_data"](positions_data)
         positions_data = broker_funcs["transform_positions_data"](positions_data)
 
         formatted_positions = _format_position_data(positions_data)

@@ -33,3 +33,8 @@ class AngelLoginPayload(BaseModel):
     clientcode: str
     broker_pin: str
     totp_code: str
+
+
+class ShoonyaLoginPayload(BaseModel):
+    password: str
+    totp_code: str

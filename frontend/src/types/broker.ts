@@ -30,3 +30,8 @@ export interface AngelLoginPayload {
   broker_pin: string;
   totp_code: string;
 }
+
+export interface ShoonyaLoginPayload {
+  password: string;
+  totp_code: string;
+}
