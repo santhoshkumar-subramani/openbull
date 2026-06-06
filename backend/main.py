@@ -119,6 +119,66 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.info("Symbol cache not loaded (will load after master contract download): %s", e)
 
+    # Daily master contract refresh: runs every morning at 08:00 IST so the
+    # symtoken table picks up new weekly/monthly expiries without requiring
+    # the user to log out and log back in.
+    async def _daily_master_contract_refresh():
+        import datetime
+        from zoneinfo import ZoneInfo
+        from backend.database import async_session as _async_session
+        from backend.models.auth import BrokerAuth
+        from backend.security import decrypt_value
+        from sqlalchemy import select as _select
+
+        IST = ZoneInfo("Asia/Kolkata")
+        TARGET_HOUR = 8  # 08:00 IST
+
+        while True:
+            try:
+                now = datetime.datetime.now(IST)
+                # Seconds until next 08:00 IST
+                next_run = now.replace(hour=TARGET_HOUR, minute=0, second=0, microsecond=0)
+                if next_run <= now:
+                    next_run += datetime.timedelta(days=1)
+                delay = (next_run - now).total_seconds()
+                logger.info("Master contract daily refresh: next run in %.0fs (at %s IST)", delay, next_run.strftime("%Y-%m-%d %H:%M"))
+                await asyncio.sleep(delay)
+
+                # Fetch active broker auth token from DB
+                async with _async_session() as db:
+                    result = await db.execute(_select(BrokerAuth).where(BrokerAuth.is_active == True))
+                    auth = result.scalar_one_or_none()
+
+                if auth is None:
+                    logger.info("Daily master contract refresh: no active broker session, skipping")
+                    continue
+
+                broker_name = auth.broker_name
+                access_token = decrypt_value(auth.access_token)
+                logger.info("Daily master contract refresh: starting for %s", broker_name)
+
+                from backend.services.symbol_service import download_master_contracts
+                from backend.services.master_contract_status import set_downloading, set_success, set_error
+                set_downloading(broker_name)
+                result_data = download_master_contracts(broker_name, auth_token=access_token)
+                if result_data.get("status") == "success":
+                    set_success(broker_name, result_data.get("count", 0))
+                    try:
+                        from backend.broker.upstox.mapping.order_data import _load_symbol_cache
+                        await _load_symbol_cache()
+                    except Exception:
+                        pass
+                    logger.info("Daily master contract refresh complete: %d symbols", result_data.get("count", 0))
+                else:
+                    set_error(broker_name, result_data.get("message", "unknown"))
+                    logger.error("Daily master contract refresh failed: %s", result_data.get("message"))
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Daily master contract refresh: unexpected error")
+
+    daily_refresh_task = asyncio.create_task(_daily_master_contract_refresh())
+
     # Start WebSocket proxy server in background
     from backend.websocket_proxy.server import start_ws_proxy, shutdown_ws_proxy
     ws_task = asyncio.create_task(
@@ -133,8 +193,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     await shutdown_ws_proxy()
     ws_task.cancel()
+    daily_refresh_task.cancel()
     try:
         await ws_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await daily_refresh_task
     except asyncio.CancelledError:
         pass
     close_httpx_client()

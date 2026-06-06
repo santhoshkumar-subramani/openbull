@@ -71,7 +71,9 @@ def get_option_underlyings(exchange: str) -> list[dict]:
         m = _OPTION_SYMBOL_PREFIX_RE.match(sample_symbol.upper())
         if not m:
             continue
-        prefix = m.group(1)
+        prefix = m.group(1).strip()
+        if not prefix:
+            continue
         # Skip exchange test instruments that the broker dumps into the master.
         if "NSETEST" in prefix or "BSETEST" in prefix:
             continue

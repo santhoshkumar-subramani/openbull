@@ -1,5 +1,6 @@
 import api from "@/config/api";
 import { getApiKey } from "@/api/apikey";
+import axios from "axios";
 
 export interface StraddlePoint {
   time: number; // unix seconds
@@ -44,9 +45,16 @@ export async function fetchStraddleChart(params: {
   days: number;
 }): Promise<StraddleResponse> {
   const apikey = await resolveApiKey();
-  const response = await api.post<StraddleResponse>("/api/v1/straddle", {
-    apikey,
-    ...params,
-  });
-  return response.data;
+  try {
+    const response = await api.post<StraddleResponse>("/api/v1/straddle", {
+      apikey,
+      ...params,
+    });
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError<StraddleResponse>(error) && error.response?.data) {
+      return error.response.data;
+    }
+    throw error;
+  }
 }

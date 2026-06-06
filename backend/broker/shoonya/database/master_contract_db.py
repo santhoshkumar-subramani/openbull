@@ -311,11 +311,18 @@ def _process_bfo(output_dir: Path) -> pd.DataFrame:
     )
     df["strike"] = df["strike"].fillna(-1).apply(_handle_strike)
 
-    # Extract name from trading symbol (leading alpha chars)
-    df["name"] = df["brsymbol"].apply(
-        lambda s: (re.match(r"([A-Za-z]+)", s).group(1) if re.match(r"([A-Za-z]+)", s) else s)
-        if isinstance(s, str) else s
-    )
+    # Extract underlying from the trading symbol. Keep digit-bearing names
+    # such as SENSEX50 instead of truncating them to leading letters only.
+    def extract_underlying(s: str) -> str:
+        if not isinstance(s, str):
+            return s
+        m = re.match(r"^([A-Z0-9]+?)(\d{2}[A-Z]{3}\d{2})", s.upper())
+        if m:
+            return m.group(1)
+        m = re.match(r"^([A-Z0-9]+)", s.upper())
+        return m.group(1) if m else s
+
+    df["name"] = df["brsymbol"].apply(extract_underlying)
 
     def extract_inst(s: str) -> str:
         if isinstance(s, str):
@@ -347,9 +354,30 @@ def _process_bfo(output_dir: Path) -> pd.DataFrame:
 
 async def _bulk_insert(df: pd.DataFrame, session_factory) -> int:
     """Insert DataFrame rows into symtoken, skipping existing (token, exchange) pairs."""
+    # Ensure token is stored as string (DB column is VARCHAR) and other
+    # numpy scalar types are converted to native Python types so asyncpg
+    # can serialize them correctly.
+    df = df.copy()
+    df["token"] = df["token"].astype(str)
+
     records = df.to_dict(orient="records")
     if not records:
         return 0
+
+    # asyncpg cannot serialize numpy scalars or NaN in string columns —
+    # convert to native Python types so asyncpg can serialize correctly.
+    import math
+    import numpy as np
+    def _to_native(v):
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (np.floating,)):
+            return None if np.isnan(v) else float(v)
+        if isinstance(v, float) and math.isnan(v):
+            return None
+        return v
+
+    records = [{k: _to_native(v) for k, v in r.items()} for r in records]
 
     async with session_factory() as session:
         # Fetch existing (token, exchange) to deduplicate
@@ -423,6 +451,13 @@ async def _run_download(auth_token: str) -> dict:
             except Exception as e:
                 logger.error("Error processing Shoonya %s: %s", segment, e)
 
+        # Mirror the freshly-inserted rows into Redis, then reload in-memory dicts.
+        # Quote/order paths use these caches for OpenBull symbol -> Shoonya token.
+        from backend.utils import symtoken_cache
+        from backend.broker.upstox.mapping.order_data import _load_symbol_cache
+        await symtoken_cache.warm_from_db()
+        await _load_symbol_cache()
+
         return {"status": "success", "count": total_inserted}
 
     except Exception as e:
@@ -439,3 +474,58 @@ def master_contract_download(auth_token: str | None = None) -> dict:
     plain threading.Thread (not the main uvicorn loop).
     """
     return asyncio.run(_run_download(auth_token or ""))
+
+
+async def search_symbols(symbol: str, exchange: str) -> list[dict]:
+    """Search symtoken for Shoonya symbols matching the query on the given exchange.
+
+    Mirrors the tokenized search behavior used by the mature broker loaders so
+    broker-agnostic symbol search accepts loose queries such as "NIFTY 28APR26".
+    """
+    tokens = [t for t in symbol.split() if t][:6]
+    if not tokens:
+        return []
+
+    where_parts = ["exchange = :exchange"]
+    params: dict = {"exchange": exchange, "prefix": f"{tokens[0]}%"}
+    for i, tok in enumerate(tokens):
+        key = f"t{i}"
+        where_parts.append(
+            f"(symbol ILIKE :{key} OR brsymbol ILIKE :{key} OR name ILIKE :{key})"
+        )
+        params[key] = f"%{tok}%"
+
+    sql = (
+        "SELECT symbol, brsymbol, name, exchange, brexchange, token, "
+        "expiry, strike, lotsize, instrumenttype, tick_size "
+        "FROM symtoken WHERE " + " AND ".join(where_parts) + " "
+        "ORDER BY "
+        "  CASE WHEN symbol ILIKE :prefix THEN 0 ELSE 1 END, "
+        "  LENGTH(symbol), symbol "
+        "LIMIT 50"
+    )
+
+    engine, factory = _build_isolated_engine_and_session()
+    try:
+        async with factory() as session:
+            result = await session.execute(text(sql), params)
+            rows = result.fetchall()
+    finally:
+        await engine.dispose()
+
+    return [
+        {
+            "symbol": row[0],
+            "brsymbol": row[1],
+            "name": row[2],
+            "exchange": row[3],
+            "brexchange": row[4],
+            "token": row[5],
+            "expiry": row[6],
+            "strike": row[7],
+            "lotsize": row[8],
+            "instrumenttype": row[9],
+            "tick_size": row[10],
+        }
+        for row in rows
+    ]

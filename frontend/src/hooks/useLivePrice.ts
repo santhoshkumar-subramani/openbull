@@ -78,13 +78,12 @@ export function useLivePrice<T extends PriceableItem>(
   } = options;
 
   const { isVisible, wasHidden } = usePageVisibility();
-  const { isAnyMarketOpen } = useMarketStatus();
+  const { isMarketOpen, isAnyMarketOpen } = useMarketStatus();
   const isPaused = pauseWhenHidden && !isVisible;
 
-  const symbols = useMemo(
-    () => items.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
-    [items],
-  );
+  const symbols = items
+    .filter((i) => isMarketOpen(i.exchange))
+    .map((i) => ({ symbol: i.symbol, exchange: i.exchange }));
   const symbolsKey = useMemo(
     () => symbols.map((s) => `${s.exchange}:${s.symbol}`).sort().join(","),
     [symbols],
@@ -97,10 +96,10 @@ export function useLivePrice<T extends PriceableItem>(
   } = useMarketData({
     symbols,
     mode: "LTP",
-    enabled: enabled && items.length > 0 && !isPaused,
+    enabled: enabled && symbols.length > 0 && !isPaused,
   });
 
-  const isLive = isAuthenticated && !isPaused;
+  const isLive = isAuthenticated && symbols.length > 0 && !isPaused;
   // Fallback mode: the WS isn't streaming, so displayed prices come from REST.
   const isFallbackMode = useMultiQuotesFallback && !isLive;
 
@@ -109,8 +108,13 @@ export function useLivePrice<T extends PriceableItem>(
 
   const fetchMultiQuotes = useCallback(async () => {
     if (!useMultiQuotesFallback || items.length === 0) return;
+    const openItems = items.filter((i) => isMarketOpen(i.exchange));
+    if (openItems.length === 0) {
+      setMultiQuotes(new Map());
+      return;
+    }
     const rows = await getMultiQuotes(
-      items.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
+      openItems.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
     );
     if (!rows.length) return;
     const next = new Map<string, MultiQuoteRow>();
@@ -118,7 +122,7 @@ export function useLivePrice<T extends PriceableItem>(
       if (r.symbol && r.exchange) next.set(`${r.exchange}:${r.symbol}`, r);
     }
     setMultiQuotes(next);
-  }, [useMultiQuotesFallback, items]);
+  }, [useMultiQuotesFallback, items, isMarketOpen]);
 
   // Poll on an interval as a fallback. WS ticks take priority in enhancedData;
   // this keeps prices fresh when the socket is down or the market is closed.
@@ -160,10 +164,15 @@ export function useLivePrice<T extends PriceableItem>(
   const enhancedData = useMemo(() => {
     return items.map((item) => {
       const key = `${item.exchange}:${item.symbol}`;
+      const marketOpen = isMarketOpen(item.exchange);
       const wsData = marketData.get(key);
       const mq = multiQuotes.get(key);
       const qty = item.quantity ?? 0;
       const avgPrice = item.average_price ?? 0;
+
+      if (!marketOpen) {
+        return { ...item } as T;
+      }
 
       const wsFresh =
         wsData?.data?.ltp != null &&
@@ -201,7 +210,7 @@ export function useLivePrice<T extends PriceableItem>(
 
       return { ...item, ltp: currentLtp, pnl, pnlpercent } as T;
     });
-  }, [items, marketData, multiQuotes, staleThreshold]);
+  }, [items, marketData, multiQuotes, staleThreshold, isMarketOpen]);
 
   return {
     data: enhancedData,

@@ -1,5 +1,6 @@
 import api from "@/config/api";
 import { getApiKey } from "@/api/apikey";
+import axios from "axios";
 import type {
   ExpiryResponse,
   FnoExchange,
@@ -32,11 +33,18 @@ export async function fetchOptionChain(params: {
   strike_count: number;
 }): Promise<OptionChainResponse> {
   const apikey = await resolveApiKey();
-  const response = await api.post<OptionChainResponse>("/api/v1/optionchain", {
-    apikey,
-    ...params,
-  });
-  return response.data;
+  try {
+    const response = await api.post<OptionChainResponse>("/api/v1/optionchain", {
+      apikey,
+      ...params,
+    });
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError<OptionChainResponse>(error) && error.response?.data) {
+      return error.response.data;
+    }
+    throw error;
+  }
 }
 
 export async function fetchExpiries(params: {
@@ -45,12 +53,19 @@ export async function fetchExpiries(params: {
   instrumenttype?: string;
 }): Promise<ExpiryResponse> {
   const apikey = await resolveApiKey();
-  const response = await api.post<ExpiryResponse>("/api/v1/expiry", {
-    apikey,
-    instrumenttype: params.instrumenttype ?? "options",
-    ...params,
-  });
-  return response.data;
+  try {
+    const response = await api.post<ExpiryResponse>("/api/v1/expiry", {
+      apikey,
+      instrumenttype: params.instrumenttype ?? "options",
+      ...params,
+    });
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError<ExpiryResponse>(error) && error.response?.data) {
+      return error.response.data;
+    }
+    throw error;
+  }
 }
 
 export async function fetchUnderlyings(exchange: FnoExchange): Promise<UnderlyingsResponse> {

@@ -15,7 +15,6 @@ from datetime import datetime, timedelta
 import httpx
 
 from backend.broker.upstox.mapping.order_data import (
-    get_brsymbol_from_cache,
     get_token_from_cache,
 )
 from backend.utils.httpx_client import get_httpx_client
@@ -38,6 +37,8 @@ _TIMEFRAME_MAP: dict[str, str] = {
     "4h": "240",
     "D": "D",
 }
+
+TIMEFRAME_MAP = _TIMEFRAME_MAP
 
 # Max days per history chunk (to avoid API timeouts)
 _CHUNK_DAYS: dict[str, int] = {
@@ -105,6 +106,45 @@ def _get_shoonya_exchange(exchange: str) -> str:
     return _INDEX_EXCHANGE_MAP.get(exchange, exchange)
 
 
+def _resolve_token(symbol: str, exchange: str) -> str:
+    token = get_token_from_cache(symbol, exchange)
+    if token:
+        return token
+
+    # Redis/in-memory cache can be stale after a broker switch or an older
+    # master-contract download. The DB is the source of truth for OpenBull
+    # symbol -> broker token mapping, so fall back to symtoken before failing.
+    from backend.services.market_data_service import _run_query
+
+    rows = _run_query(
+        "SELECT token FROM symtoken WHERE symbol = :symbol AND exchange = :exchange LIMIT 1",
+        {"symbol": symbol, "exchange": exchange},
+    )
+    if rows and rows[0][0]:
+        return str(rows[0][0])
+
+    raise ValueError(
+        f"Symbol {exchange}:{symbol} not in master contracts - download Shoonya master contracts first"
+    )
+
+
+def _quote_from_shoonya(data: dict) -> dict:
+    return {
+        "ltp": float(data.get("lp", 0) or 0),
+        "open": float(data.get("o", 0) or 0),
+        "high": float(data.get("h", 0) or 0),
+        "low": float(data.get("l", 0) or 0),
+        "close": float(data.get("c", 0) or 0),
+        "prev_close": float(data.get("c", 0) or 0),
+        "volume": int(float(data.get("v", 0) or 0)),
+        "oi": int(float(data.get("oi", 0) or 0)),
+        "bid": float(data.get("bp1", 0) or 0),
+        "ask": float(data.get("sp1", 0) or 0),
+        "bid_qty": int(float(data.get("bq1", 0) or 0)),
+        "ask_qty": int(float(data.get("sq1", 0) or 0)),
+    }
+
+
 def get_quotes(
     symbol: str, exchange: str, auth_token: str, config: dict | None = None
 ) -> dict:
@@ -116,8 +156,7 @@ def get_quotes(
     config = config or {}
     user_id = config.get("client_id", "")
 
-    brsymbol = get_brsymbol_from_cache(symbol, exchange) or symbol
-    token = get_token_from_cache(symbol, exchange) or ""
+    token = _resolve_token(symbol, exchange)
 
     shoonya_exchange = _get_shoonya_exchange(exchange)
 
@@ -133,20 +172,7 @@ def get_quotes(
         if data.get("stat") != "Ok":
             raise ValueError(f"Shoonya GetQuotes error: {data.get('emsg', 'Unknown')}")
 
-        return {
-            "ltp": float(data.get("lp", 0) or 0),
-            "open": float(data.get("o", 0) or 0),
-            "high": float(data.get("h", 0) or 0),
-            "low": float(data.get("l", 0) or 0),
-            "close": float(data.get("c", 0) or 0),
-            "prev_close": float(data.get("c", 0) or 0),
-            "volume": int(float(data.get("v", 0) or 0)),
-            "oi": int(float(data.get("oi", 0) or 0)),
-            "bid": float(data.get("bp1", 0) or 0),
-            "ask": float(data.get("sp1", 0) or 0),
-            "bid_qty": int(float(data.get("bq1", 0) or 0)),
-            "ask_qty": int(float(data.get("sq1", 0) or 0)),
-        }
+        return _quote_from_shoonya(data)
     except Exception as e:
         logger.error("Error fetching Shoonya quote for %s/%s: %s", symbol, exchange, e)
         raise
@@ -156,19 +182,18 @@ def _fetch_single_quote(
     symbol: str, exchange: str, auth_token: str, user_id: str
 ) -> dict:
     """Fetch a single symbol's quote synchronously (for ThreadPoolExecutor)."""
-    brsymbol = get_brsymbol_from_cache(symbol, exchange) or symbol
-    token = get_token_from_cache(symbol, exchange) or ""
-    shoonya_exchange = _get_shoonya_exchange(exchange)
-
-    payload = {
-        "uid": user_id,
-        "exch": shoonya_exchange,
-        "token": token,
-    }
-    payload_str = "jData=" + json.dumps(payload)
-    headers = _api_headers(auth_token)
-
     try:
+        token = _resolve_token(symbol, exchange)
+        shoonya_exchange = _get_shoonya_exchange(exchange)
+
+        payload = {
+            "uid": user_id,
+            "exch": shoonya_exchange,
+            "token": token,
+        }
+        payload_str = "jData=" + json.dumps(payload)
+        headers = _api_headers(auth_token)
+
         response = httpx.post(
             f"{_BASE_URL}/GetQuotes",
             content=payload_str,
@@ -187,20 +212,7 @@ def _fetch_single_quote(
         return {
             "symbol": symbol,
             "exchange": exchange,
-            "data": {
-                "ltp": float(data.get("lp", 0) or 0),
-                "open": float(data.get("o", 0) or 0),
-                "high": float(data.get("h", 0) or 0),
-                "low": float(data.get("l", 0) or 0),
-                "close": float(data.get("c", 0) or 0),
-                "prev_close": float(data.get("c", 0) or 0),
-                "volume": int(float(data.get("v", 0) or 0)),
-                "oi": int(float(data.get("oi", 0) or 0)),
-                "bid": float(data.get("bp1", 0) or 0),
-                "ask": float(data.get("sp1", 0) or 0),
-                "bid_qty": int(float(data.get("bq1", 0) or 0)),
-                "ask_qty": int(float(data.get("sq1", 0) or 0)),
-            },
+            **_quote_from_shoonya(data),
         }
     except Exception as e:
         return {"symbol": symbol, "exchange": exchange, "error": str(e)}
@@ -239,7 +251,7 @@ def get_multi_quotes(
             for future in as_completed(futures):
                 try:
                     result = future.result()
-                    if "data" in result:
+                    if "error" not in result:
                         results.append(result)
                     elif "error" in result:
                         logger.warning(
@@ -262,7 +274,7 @@ def get_market_depth(
     config = config or {}
     user_id = config.get("client_id", "")
 
-    token = get_token_from_cache(symbol, exchange) or ""
+    token = _resolve_token(symbol, exchange)
     shoonya_exchange = _get_shoonya_exchange(exchange)
 
     payload = {
@@ -324,7 +336,7 @@ def get_history(
     if not resolution:
         raise ValueError(f"Unsupported interval: {interval}. Supported: {list(_TIMEFRAME_MAP)}")
 
-    token = get_token_from_cache(symbol, exchange) or ""
+    token = _resolve_token(symbol, exchange)
     shoonya_exchange = _get_shoonya_exchange(exchange)
 
     # Parse input dates
