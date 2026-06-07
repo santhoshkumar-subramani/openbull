@@ -1,0 +1,10 @@
+{
+    "name": "shoonya",
+    "display_name": "Shoonya (Finvasia)",
+    "description": "Shoonya by Finvasia broker integration for OpenBull",
+    "version": "1.0",
+    "supported_exchanges": ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
+    "broker_type": "IN_stock",
+    "oauth_type": "credentials",
+    "auth_url_template": ""
+}

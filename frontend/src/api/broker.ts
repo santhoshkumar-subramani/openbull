@@ -5,6 +5,7 @@ import type {
   BrokerConfigData,
   BrokerConfigResponse,
   BrokerRedirectResponse,
+  ShoonyaLoginPayload,
 } from "@/types/broker";
 
 export async function listBrokers(): Promise<BrokerListItem[]> {
@@ -37,5 +38,10 @@ export async function getBrokerRedirectUrl(broker: string): Promise<BrokerRedire
 
 export async function angelLogin(payload: AngelLoginPayload): Promise<{ status: string; broker: string }> {
   const response = await api.post<{ status: string; broker: string }>("/angel/login", payload);
+  return response.data;
+}
+
+export async function shoonyaLogin(payload: ShoonyaLoginPayload): Promise<{ status: string; broker: string }> {
+  const response = await api.post<{ status: string; broker: string }>("/shoonya/login", payload);
   return response.data;
 }

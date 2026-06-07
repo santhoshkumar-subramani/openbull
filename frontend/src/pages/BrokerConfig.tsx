@@ -77,6 +77,18 @@ const HELP_BY_BROKER: Record<string, BrokerHelp> = {
     banner:
       "Angel One does not use OAuth. After saving the API Key, click Login with Angel One on the broker page and enter your Client Code, MPIN and TOTP.",
   },
+  shoonya: {
+    apiKeyLabel: "App Key",
+    apiKeyHint: "Shoonya developer/API App Key.",
+    apiSecretLabel: "Vendor Code",
+    apiSecretHint: "Shoonya developer/API Vendor Code.",
+    redirectHint: "Shoonya does not use OAuth, so the redirect URL is unused (you can leave it blank).",
+    showApiSecret: true,
+    showRedirect: false,
+    showClientId: false,
+    banner:
+      "Shoonya (Finvasia) does not use OAuth. After saving the credentials, click Login with Shoonya on the broker page and enter your User ID, Password and TOTP.",
+  },
 };
 
 export default function BrokerConfig() {

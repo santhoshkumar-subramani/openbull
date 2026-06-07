@@ -13,7 +13,7 @@ from backend.models.user import User
 from backend.models.auth import BrokerAuth
 from backend.models.broker_config import BrokerConfig
 from backend.models.audit import LoginAttempt, ActiveSession
-from backend.schemas.broker import AngelLoginPayload
+from backend.schemas.broker import AngelLoginPayload, ShoonyaLoginPayload
 from backend.security import encrypt_value, decrypt_value, create_access_token
 from backend.utils.plugin_loader import get_plugin_info, get_broker_module
 
@@ -82,6 +82,11 @@ async def broker_redirect(
     # to /angel/login.
     if broker == "angel":
         return {"url": "/broker/angel/totp", "kind": "internal"}
+
+    # Shoonya: no OAuth. Frontend renders a credentials/TOTP form and POSTs
+    # to /shoonya/login.
+    if broker == "shoonya":
+        return {"url": "/broker/shoonya/totp", "kind": "internal"}
 
     # Dhan: 2-step. Generate consent server-side, then redirect the browser
     # to consentApp-login. The plugin's auth_url_template is informational
@@ -227,6 +232,37 @@ async def angel_login(
         path="/",
     )
     return {"status": "success", "broker": "angel"}
+
+
+@router.post("/shoonya/login")
+async def shoonya_login(
+    payload: ShoonyaLoginPayload,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate with Shoonya using userid + password + TOTP.
+
+    Shoonya doesn't OAuth; this endpoint is the credentials-form equivalent
+    of an OAuth callback.
+    """
+    creds = f"{payload.userid.strip()}:{payload.password.strip()}:{payload.totp_code.strip()}"
+    new_token, error = await _finalize_broker_auth(
+        "shoonya", creds, user.id, user.username, request, db
+    )
+    if not new_token:
+        raise HTTPException(status_code=401, detail=error or "Shoonya authentication failed")
+
+    response.set_cookie(
+        key="access_token",
+        value=new_token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        path="/",
+    )
+    return {"status": "success", "broker": "shoonya"}
 
 
 def _start_master_contract_download(broker_name: str, auth_token: str):

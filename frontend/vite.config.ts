@@ -20,6 +20,7 @@ export default defineConfig({
     host: "127.0.0.1", // force IPv4 loopback — Node on Windows binds "localhost" to ::1-only
     port: 5173,
     strictPort: true,
+    allowedHosts: ["openbull.santhoshvps.org"],
     proxy: {
       // Trailing slashes prevent accidental prefix matches — e.g. the bare
       // "/web" rule used to swallow "/websocket/test" because it starts with
@@ -30,6 +31,8 @@ export default defineConfig({
       "/health": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/upstox/": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/zerodha/": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/angel/": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/shoonya/": { target: "http://127.0.0.1:8000", changeOrigin: true },
       // Strategy module WebSocket — proxied with ws:true so the upgrade
       // handshake is forwarded to the backend. Without this Vite serves
       // the SPA's index.html for /ws/strategy/{id} and the browser sees

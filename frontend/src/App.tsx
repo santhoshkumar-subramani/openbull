@@ -13,6 +13,7 @@ import Dashboard from "@/pages/Dashboard";
 import BrokerConfig from "@/pages/BrokerConfig";
 import BrokerSelect from "@/pages/BrokerSelect";
 import BrokerAngelLogin from "@/pages/BrokerAngelLogin";
+import BrokerShoonyaLogin from "@/pages/BrokerShoonyaLogin";
 import ApiKey from "@/pages/ApiKey";
 import OrderBook from "@/pages/OrderBook";
 import TradeBook from "@/pages/TradeBook";
@@ -94,6 +95,16 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <BrokerAngelLogin />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Shoonya credentials/TOTP login (no OAuth) */}
+              <Route
+                path="/broker/shoonya/totp"
+                element={
+                  <ProtectedRoute>
+                    <BrokerShoonyaLogin />
                   </ProtectedRoute>
                 }
               />

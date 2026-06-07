@@ -74,6 +74,9 @@ def _create_adapter(broker_name: str, auth_token: str, config: dict) -> BaseBrok
     elif broker_name == "angel":
         from backend.broker.angel.streaming.angel_adapter import AngelAdapter
         return AngelAdapter(auth_token, config)
+    elif broker_name == "shoonya":
+        from backend.broker.shoonya.streaming.shoonya_adapter import ShoonyaAdapter
+        return ShoonyaAdapter(auth_token, config)
     raise ValueError(f"No streaming adapter for broker: {broker_name}")
 
 
