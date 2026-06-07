@@ -31,8 +31,3 @@ export interface AngelLoginPayload {
   totp_code: string;
 }
 
-export interface ShoonyaLoginPayload {
-  userid: string;
-  password: string;
-  totp_code: string;
-}

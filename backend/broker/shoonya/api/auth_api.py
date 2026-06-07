@@ -1,13 +1,18 @@
 """
-Shoonya (Finvasia / Noren) authentication.
+Shoonya (Finvasia) authentication via OAuth + GenAcsTok.
 
-Shoonya uses a credentials flow: userid + password (SHA-256 hashed) + TOTP,
-plus a vendor code and app key (also hashed). No browser-based OAuth.
+Flow:
+  1. Frontend redirects user to Shoonya OAuth login page.
+  2. User logs in (user ID + password + TOTP) and clicks "Authorize".
+  3. Shoonya redirects to our /shoonya/callback with ?code=OAUTH_CODE.
+  4. This module exchanges the code for a session token via GenAcsTok.
 
-To match the openbull contract ``authenticate_broker(code_or_token, config)``,
-the first argument is ``"userid:password:totp_code"``.  The returned access
-token is ``"userid:susertoken:actid"`` so downstream callers (REST + WS)
-can recover everything they need.
+Credentials sourced from broker config:
+  - api_key    : Vendor code, e.g. "FA99299_U"  (client_id in OAuth URL)
+  - api_secret : App secret key                  (used in checksum)
+  - client_id  : Trading account user ID, e.g. "FA99299"  (uid)
+
+GenAcsTok checksum = SHA-256(vendor_code + api_secret + oauth_code)
 """
 
 import hashlib
@@ -18,101 +23,79 @@ from backend.utils.httpx_client import get_httpx_client
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.shoonya.com/NorenWClientTP"
+_GEN_ACS_TOK_URL = "https://api.shoonya.com/NorenWClientAPI/GenAcsTok"
 
 
-def _sha256(text: str) -> str:
-    """Return the hex SHA-256 digest of *text*."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _post(endpoint: str, payload: dict, jkey: str | None = None) -> dict:
-    """POST to a Shoonya REST endpoint.
-
-    Shoonya uses ``jData`` (URL-encoded JSON) + ``jKey`` (session token) as
-    form fields, *not* JSON bodies or Bearer headers.
-    """
-    data: dict[str, str] = {"jData": json.dumps(payload)}
-    if jkey:
-        data["jKey"] = jkey
-
-    client = get_httpx_client()
-    response = client.post(
-        f"{BASE_URL}/{endpoint}",
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-
-    try:
-        return response.json()
-    except json.JSONDecodeError:
-        return {"stat": "Not_Ok", "emsg": f"Invalid JSON (HTTP {response.status_code})"}
-
-
-def authenticate_broker(
-    code_or_token: str, config: dict
-) -> tuple[str | None, str | None]:
-    """Authenticate with Shoonya (Finvasia).
+def authenticate_broker(code_or_token: str, config: dict) -> tuple[str | None, str | None]:
+    """Exchange Shoonya OAuth code for a session token via GenAcsTok.
 
     Args:
-        code_or_token: ``"userid:password:totp_code"`` — the credentials the
-            user submitted via the login form.
-        config: Broker config dict with ``api_key`` (appkey) and
-            ``api_secret`` (vendor_code).
+        code_or_token: The OAuth authorization code received from Shoonya's
+            redirect callback (the ``code`` query parameter).
+        config: Broker config dict with ``api_key`` (vendor code),
+                ``api_secret`` (app secret), and ``client_id`` (user ID).
 
     Returns:
-        ``(combined_token, error_message)`` where ``combined_token`` is
-        ``"userid:susertoken:actid"``.
+        ``(susertoken, error_message)``
     """
     try:
-        api_key = config.get("api_key")
-        vendor_code = config.get("api_secret")
+        uid = config.get("client_id", "").strip()          # trading account ID (FA99299)
+        vendor_code = config.get("api_key", "").strip()    # vendor code (FA99299_U)
+        api_secret = config.get("api_secret", "").strip()  # app secret
+        oauth_code = code_or_token.strip() if code_or_token else ""
 
-        if not api_key:
-            return None, "Missing api_key (Shoonya appkey) in broker configuration."
+        if not uid:
+            return None, "Missing User ID (trading account ID) in broker configuration."
         if not vendor_code:
-            return None, "Missing api_secret (Shoonya vendor_code) in broker configuration."
+            return None, "Missing Vendor Code (API Key) in broker configuration."
+        if not api_secret:
+            return None, "Missing App Secret in broker configuration."
+        if not oauth_code:
+            return None, "Missing OAuth authorization code."
 
-        if not code_or_token or code_or_token.count(":") < 2:
-            return None, (
-                "Shoonya credentials must be in the form "
-                "'userid:password:totp_code'."
-            )
-
-        userid, password, totp_code = code_or_token.split(":", 2)
-        userid = userid.strip()
-        password = password.strip()
-        totp_code = totp_code.strip()
-
-        if not all([userid, password, totp_code]):
-            return None, "userid, password and totp_code are all required."
-
-        # Shoonya expects SHA-256 hashed password and appkey.
-        pwd_hash = _sha256(password)
-        appkey_hash = _sha256(f"{userid}|{api_key}")
+        # checksum = SHA-256(vendor_code + api_secret + oauth_code)  — no separators
+        checksum = hashlib.sha256(
+            f"{vendor_code}{api_secret}{oauth_code}".encode()
+        ).hexdigest()
 
         payload = {
-            "apkversion": "1.0.0",
-            "uid": userid,
-            "pwd": pwd_hash,
-            "factor2": totp_code,
-            "vc": vendor_code,
-            "appkey": appkey_hash,
-            "imei": "openbull",
-            "source": "API",
+            "code": oauth_code,
+            "checksum": checksum,
+            "uid": uid,
         }
+        payload_str = "jData=" + json.dumps(payload)
+        logger.info(f"Shoonya GenAcsTok payload: {payload_str}")
 
-        result = _post("QuickAuth", payload)
+        client = get_httpx_client()
+        response = client.post(
+            _GEN_ACS_TOK_URL,
+            content=payload_str,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
 
-        if result.get("stat") == "Ok" and result.get("susertoken"):
-            susertoken = result["susertoken"]
-            actid = result.get("actid", userid)
-            combined = f"{userid}:{susertoken}:{actid}"
-            logger.info("Successfully authenticated with Shoonya (user=%s)", userid)
-            return combined, None
+        if response.status_code >= 500:
+            logger.error("Shoonya server error (GenAcsTok) HTTP %s", response.status_code)
+            return None, (
+                f"Shoonya server is currently unavailable (HTTP {response.status_code}). "
+                "Please try again in a few minutes."
+            )
+        if response.status_code >= 400:
+            logger.error("Shoonya API error (GenAcsTok) HTTP %s", response.status_code)
+            return None, f"Shoonya API error (HTTP {response.status_code}). Check your credentials."
 
-        message = result.get("emsg", "Authentication failed. Please try again.")
-        return None, message
+        try:
+            data = response.json()
+        except Exception:
+            return None, f"Unexpected response from Shoonya (HTTP {response.status_code})."
+
+        # Successful response contains susertoken
+        if "susertoken" in data:
+            logger.info("Successfully authenticated with Shoonya for uid=%s", uid)
+            return data["susertoken"], None
+
+        error_msg = data.get("emsg", "Authentication failed. Please try again.")
+        logger.error("Shoonya GenAcsTok error for uid=%s: %s", uid, error_msg)
+        return None, error_msg
 
     except Exception as e:
         logger.exception("Unexpected error during Shoonya authentication")

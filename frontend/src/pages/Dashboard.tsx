@@ -74,8 +74,8 @@ function withSign(value: number, formatter: (n: number) => string): string {
 
 type OrderTone = "complete" | "pending" | "rejected" | "cancelled";
 
-function orderTone(status: string): OrderTone {
-  const s = status.toLowerCase();
+function orderTone(status: string | null | undefined): OrderTone {
+  const s = (status || "").toLowerCase();
   if (s.includes("complete") || s.includes("filled") || s.includes("executed"))
     return "complete";
   if (s.includes("reject")) return "rejected";

@@ -13,7 +13,7 @@ from backend.models.user import User
 from backend.models.auth import BrokerAuth
 from backend.models.broker_config import BrokerConfig
 from backend.models.audit import LoginAttempt, ActiveSession
-from backend.schemas.broker import AngelLoginPayload, ShoonyaLoginPayload
+from backend.schemas.broker import AngelLoginPayload
 from backend.security import encrypt_value, decrypt_value, create_access_token
 from backend.utils.plugin_loader import get_plugin_info, get_broker_module
 
@@ -44,10 +44,16 @@ def _frontend_url_for_request(request: Request) -> str:
     redirect. Falls back to settings.frontend_url when the request has no
     parseable hostname.
     """
+    # If the user has explicitly configured a public FRONTEND_URL in .env,
+    # just use it directly. The hostname replacement is only needed for local
+    # development to solve the localhost vs 127.0.0.1 cookie scoping issue.
+    if "localhost" not in settings.frontend_url and "127.0.0.1" not in settings.frontend_url:
+        return settings.frontend_url.rstrip("/")
+
     parsed = urlparse(settings.frontend_url)
-    request_hostname = request.url.hostname
+    request_hostname = request.headers.get("x-forwarded-host") or request.url.hostname
     if not request_hostname:
-        return settings.frontend_url
+        return settings.frontend_url.rstrip("/")
     netloc = f"{request_hostname}:{parsed.port}" if parsed.port else request_hostname
     return urlunparse((parsed.scheme, netloc, "", "", "", "")).rstrip("/")
 
@@ -83,10 +89,7 @@ async def broker_redirect(
     if broker == "angel":
         return {"url": "/broker/angel/totp", "kind": "internal"}
 
-    # Shoonya: no OAuth. Frontend renders a credentials/TOTP form and POSTs
-    # to /shoonya/login.
-    if broker == "shoonya":
-        return {"url": "/broker/shoonya/totp", "kind": "internal"}
+
 
     # Dhan: 2-step. Generate consent server-side, then redirect the browser
     # to consentApp-login. The plugin's auth_url_template is informational
@@ -234,35 +237,19 @@ async def angel_login(
     return {"status": "success", "broker": "angel"}
 
 
-@router.post("/shoonya/login")
-async def shoonya_login(
-    payload: ShoonyaLoginPayload,
+@router.get("/shoonya/callback")
+async def shoonya_callback(
     request: Request,
     response: Response,
-    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Authenticate with Shoonya using userid + password + TOTP.
+    """Handle Shoonya OAuth callback."""
+    code = request.query_params.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
 
-    Shoonya doesn't OAuth; this endpoint is the credentials-form equivalent
-    of an OAuth callback.
-    """
-    creds = f"{payload.userid.strip()}:{payload.password.strip()}:{payload.totp_code.strip()}"
-    new_token, error = await _finalize_broker_auth(
-        "shoonya", creds, user.id, user.username, request, db
-    )
-    if not new_token:
-        raise HTTPException(status_code=401, detail=error or "Shoonya authentication failed")
-
-    response.set_cookie(
-        key="access_token",
-        value=new_token,
-        httponly=True,
-        samesite="lax",
-        secure=settings.cookie_secure,
-        path="/",
-    )
-    return {"status": "success", "broker": "shoonya"}
+    state = request.query_params.get("state")
+    return await _handle_oauth_callback("shoonya", code, request, response, db, state=state)
 
 
 def _start_master_contract_download(broker_name: str, auth_token: str):

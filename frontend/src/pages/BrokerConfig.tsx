@@ -78,16 +78,18 @@ const HELP_BY_BROKER: Record<string, BrokerHelp> = {
       "Angel One does not use OAuth. After saving the API Key, click Login with Angel One on the broker page and enter your Client Code, MPIN and TOTP.",
   },
   shoonya: {
-    apiKeyLabel: "App Key",
-    apiKeyHint: "Shoonya developer/API App Key.",
-    apiSecretLabel: "Vendor Code",
-    apiSecretHint: "Shoonya developer/API Vendor Code.",
-    redirectHint: "Shoonya does not use OAuth, so the redirect URL is unused (you can leave it blank).",
+    apiKeyLabel: "API Key (Vendor Code)",
+    apiKeyHint: "Vendor code from the Shoonya / Finvasia developer portal for your API app.",
+    apiSecretLabel: "App Secret",
+    apiSecretHint: "App secret from the Shoonya developer portal.",
+    redirectHint: "e.g. https://yourdomain.com/auth/shoonya/callback — must match what is registered in your Shoonya API app.",
     showApiSecret: true,
-    showRedirect: false,
-    showClientId: false,
+    showRedirect: true,
+    showClientId: true,
+    clientIdLabel: "User ID (Trading Account ID)",
+    clientIdHint: "Your Shoonya/Finvasia trading account user ID (e.g. FA12345).",
     banner:
-      "Shoonya (Finvasia) does not use OAuth. After saving the credentials, click Login with Shoonya on the broker page and enter your User ID, Password and TOTP.",
+      "Shoonya uses OAuth login. After clicking Login, you will be taken to the Shoonya login page. Enter your User ID, Password, and TOTP — then click the 'Authorize' button that appears. You will be redirected back here automatically.",
   },
 };
 

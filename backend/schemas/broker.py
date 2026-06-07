@@ -35,7 +35,3 @@ class AngelLoginPayload(BaseModel):
     totp_code: str
 
 
-class ShoonyaLoginPayload(BaseModel):
-    userid: str
-    password: str
-    totp_code: str

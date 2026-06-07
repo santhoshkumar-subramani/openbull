@@ -147,7 +147,7 @@ def transform_order_data(orders) -> list[dict]:
             "pricetype": order.get("prctyp", ""),
             "product": order.get("prd", ""),
             "orderid": order.get("norenordno", ""),
-            "order_status": order.get("status", ""),
+            "order_status": order.get("status") or "",
             "timestamp": order.get("norentm", ""),
         })
 
