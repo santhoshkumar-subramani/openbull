@@ -22,7 +22,7 @@ from backend.utils.httpx_client import get_httpx_client
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.shoonya.com/NorenWClientTP"
+BASE_URL = "https://api.shoonya.com/NorenWClientAPI"
 
 TIMEFRAME_MAP = {
     "1m": "1",
@@ -52,11 +52,11 @@ def _split_token(auth_token: str) -> tuple[str, str, str]:
 
 
 def _post(endpoint: str, payload: dict, jkey: str) -> dict:
-    data = {"jData": json.dumps(payload), "jKey": jkey}
+    payload_str = f"jData={json.dumps(payload)}&jKey={jkey}"
     client = get_httpx_client()
     response = client.post(
         f"{BASE_URL}/{endpoint}",
-        data=data,
+        content=payload_str,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:

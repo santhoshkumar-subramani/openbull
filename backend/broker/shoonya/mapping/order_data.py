@@ -59,10 +59,13 @@ def map_order_data(order_data: list | dict) -> list[dict]:
     and Shoonya product/price types to OpenBull conventions.
     """
     if isinstance(order_data, dict):
-        if order_data.get("stat") == "Not_Ok":
+        if "data" in order_data and "status" in order_data:
+            order_data = order_data.get("data", [])
+        elif order_data.get("stat") == "Not_Ok":
             logger.debug("No order data: %s", order_data.get("emsg"))
             return []
-        order_data = [order_data]
+        else:
+            order_data = [order_data]
 
     if not order_data:
         return []
@@ -157,10 +160,13 @@ def transform_order_data(orders) -> list[dict]:
 def map_trade_data(trade_data: list | dict) -> list[dict]:
     """Map Shoonya trade data — same normalization as map_order_data."""
     if isinstance(trade_data, dict):
-        if trade_data.get("stat") == "Not_Ok":
+        if "data" in trade_data and "status" in trade_data:
+            trade_data = trade_data.get("data", [])
+        elif trade_data.get("stat") == "Not_Ok":
             logger.debug("No trade data: %s", trade_data.get("emsg"))
             return []
-        trade_data = [trade_data]
+        else:
+            trade_data = [trade_data]
 
     if not trade_data:
         return []
@@ -316,15 +322,14 @@ def map_portfolio_data(portfolio_data, auth_token=None, broker=None, config=None
 
     Fetches live LTPs using get_multi_quotes_with_auth if auth context is supplied.
     """
-    if portfolio_data is None or (
-        isinstance(portfolio_data, dict)
-        and portfolio_data.get("stat") == "Not_Ok"
-    ):
-        logger.info("No holdings available.")
-        return []
-
     if isinstance(portfolio_data, dict):
-        portfolio_data = [portfolio_data]
+        if "data" in portfolio_data and "status" in portfolio_data:
+            portfolio_data = portfolio_data.get("data", [])
+        elif portfolio_data.get("stat") == "Not_Ok":
+            logger.info("No holdings available.")
+            return []
+        else:
+            portfolio_data = [portfolio_data]
 
     if not isinstance(portfolio_data, list):
         return []

@@ -91,7 +91,9 @@ def authenticate_broker(code_or_token: str, config: dict) -> tuple[str | None, s
         # Successful response contains susertoken
         if "susertoken" in data:
             logger.info("Successfully authenticated with Shoonya for uid=%s", uid)
-            return data["susertoken"], None
+            # order_api.py _split_token expects "userid:susertoken:actid"
+            combined_token = f"{uid}:{data['susertoken']}:{uid}"
+            return combined_token, None
 
         error_msg = data.get("emsg", "Authentication failed. Please try again.")
         logger.error("Shoonya GenAcsTok error for uid=%s: %s", uid, error_msg)

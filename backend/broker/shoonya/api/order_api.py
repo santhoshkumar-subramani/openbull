@@ -23,7 +23,7 @@ from backend.utils.httpx_client import get_httpx_client
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.shoonya.com/NorenWClientTP"
+BASE_URL = "https://api.shoonya.com/NorenWClientAPI"
 
 # --- Cache for position book to prevent rapid API polling ---
 _position_cache: dict = {}
@@ -61,11 +61,11 @@ def _split_token(auth_token: str) -> tuple[str, str, str]:
 
 def _post(endpoint: str, payload: dict, jkey: str) -> dict:
     """POST to Shoonya with jData + jKey form encoding."""
-    data = {"jData": json.dumps(payload), "jKey": jkey}
+    payload_str = f"jData={json.dumps(payload)}&jKey={jkey}"
     client = get_httpx_client()
     response = client.post(
         f"{BASE_URL}/{endpoint}",
-        data=data,
+        content=payload_str,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
@@ -78,11 +78,11 @@ def _post(endpoint: str, payload: dict, jkey: str) -> dict:
 
 def _post_raw(endpoint: str, payload: dict, jkey: str) -> tuple:
     """POST to Shoonya, returning both the raw response and parsed JSON dict/list."""
-    data = {"jData": json.dumps(payload), "jKey": jkey}
+    payload_str = f"jData={json.dumps(payload)}&jKey={jkey}"
     client = get_httpx_client()
     response = client.post(
         f"{BASE_URL}/{endpoint}",
-        data=data,
+        content=payload_str,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
@@ -348,7 +348,7 @@ def get_order_book(auth_token: str, config: dict | None = None) -> dict:
     if isinstance(result, dict) and result.get("stat") == "Not_Ok":
         if "no data" in (result.get("emsg") or "").lower():
             return {"status": True, "data": []}
-        return {"status": False, "message": result.get("emsg", "")}
+        return {"status": "error", "message": result.get("emsg", "")}
     return {"status": True, "data": []}
 
 
@@ -365,7 +365,7 @@ def get_trade_book(auth_token: str, config: dict | None = None) -> dict:
     if isinstance(result, dict) and result.get("stat") == "Not_Ok":
         if "no data" in (result.get("emsg") or "").lower():
             return {"status": True, "data": []}
-        return {"status": False, "message": result.get("emsg", "")}
+        return {"status": "error", "message": result.get("emsg", "")}
     return {"status": True, "data": []}
 
 
@@ -382,7 +382,7 @@ def get_positions(auth_token: str, config: dict | None = None) -> dict:
     if isinstance(result, dict) and result.get("stat") == "Not_Ok":
         if "no data" in (result.get("emsg") or "").lower():
             return {"status": True, "data": []}
-        return {"status": False, "message": result.get("emsg", "")}
+        return {"status": "error", "message": result.get("emsg", "")}
     return {"status": True, "data": []}
 
 
@@ -399,5 +399,5 @@ def get_holdings(auth_token: str, config: dict | None = None) -> dict:
     if isinstance(result, dict) and result.get("stat") == "Not_Ok":
         if "no data" in (result.get("emsg") or "").lower():
             return {"status": True, "data": []}
-        return {"status": False, "message": result.get("emsg", "")}
+        return {"status": "error", "message": result.get("emsg", "")}
     return {"status": True, "data": []}

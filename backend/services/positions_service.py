@@ -73,6 +73,7 @@ def get_positions_with_auth(
 
     try:
         positions_data = broker_funcs["get_positions"](auth_token)
+        logger.info(f"Raw positions_data: {positions_data}")
 
         if isinstance(positions_data, dict) and positions_data.get("status") == "error":
             return (
