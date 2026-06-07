@@ -224,7 +224,19 @@ def transform_positions_data(positions_data: list[dict]) -> list[dict]:
         except (TypeError, ValueError):
             quantity = 0
         try:
-            avg_price = float(pos.get("netavgprc") or 0.0)
+            # TODO: Revisit this functionality later if any issues are identified.
+            # Shoonya uses `upldprc` for the true carry-forward entry price, 
+            # while `netavgprc` often resets to the previous day's close.
+            # We prioritize `upldprc`, then `dayavgprc` (intraday), then `netavgprc`.
+            upldprc = float(pos.get("upldprc") or 0.0)
+            if upldprc > 0.0:
+                avg_price = upldprc
+            else:
+                dayavgprc = float(pos.get("dayavgprc") or 0.0)
+                if dayavgprc > 0.0:
+                    avg_price = dayavgprc
+                else:
+                    avg_price = float(pos.get("netavgprc") or 0.0)
         except (TypeError, ValueError):
             avg_price = 0.0
         try:
@@ -242,6 +254,9 @@ def transform_positions_data(positions_data: list[dict]) -> list[dict]:
         except (TypeError, ValueError):
             rpnl = 0.0
         pnl = urmtom + rpnl
+
+        if pnl == 0.0 and quantity != 0 and avg_price > 0 and ltp > 0:
+            pnl = (ltp - avg_price) * quantity + rpnl
 
         transformed.append({
             "symbol": pos.get("tsym", ""),
