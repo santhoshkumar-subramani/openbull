@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CirclePlus, Trash2 } from "lucide-react";
+import { CirclePlus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 
 import { getPositions } from "@/api/dashboard";
 import {
@@ -83,6 +83,25 @@ export default function GroupedPositions() {
 
   // State for confirming group deletion
   const [groupToDelete, setGroupToDelete] = useState<PositionGroup | null>(null);
+
+  // Folded state for tables
+  const [foldedState, setFoldedState] = useState<Record<string, boolean>>({});
+
+  const toggleFold = (key: string) => {
+    setFoldedState((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const foldAll = () => {
+    const next: Record<string, boolean> = { master: true };
+    groups?.forEach((g) => {
+      next[g.id.toString()] = true;
+    });
+    setFoldedState(next);
+  };
+
+  const expandAll = () => {
+    setFoldedState({});
+  };
 
   // Queries
   const { data: positions, isLoading: isPositionsLoading } = useQuery({
@@ -201,6 +220,8 @@ export default function GroupedPositions() {
           <p className="text-sm text-muted-foreground">Manage your positions by strategy</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={foldAll}>Fold All</Button>
+          <Button variant="outline" onClick={expandAll}>Expand All</Button>
           <Button onClick={() => setIsCreateGroupOpen(true)}>
             Create New Strategy Group
           </Button>
@@ -215,29 +236,43 @@ export default function GroupedPositions() {
 
       {/* Master Table */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Master Positions
-            {isLive ? (
-              <Badge
-                variant="outline"
-                className="gap-1 border-green-500/40 text-green-600 dark:text-green-400"
-              >
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-500" />
-                Live
-              </Badge>
-            ) : isPaused ? (
-              <Badge variant="outline" className="text-muted-foreground">
-                Paused
-              </Badge>
-            ) : null}
-          </CardTitle>
-          <CardDescription>
-            All open positions across your account.
-          </CardDescription>
+        <CardHeader 
+          className="cursor-pointer select-none flex flex-row items-start justify-between space-y-0 pb-4 transition-colors hover:bg-muted/30"
+          onClick={() => toggleFold('master')}
+        >
+          <div className="flex flex-col gap-1.5">
+            <CardTitle className="flex items-center gap-2">
+              {foldedState['master'] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
+              Master Positions
+              {isLive ? (
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-green-500/40 text-green-600 dark:text-green-400"
+                >
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-500" />
+                  Live
+                </Badge>
+              ) : isPaused ? (
+                <Badge variant="outline" className="text-muted-foreground">
+                  Paused
+                </Badge>
+              ) : null}
+            </CardTitle>
+            <CardDescription>
+              All open positions across your account.
+            </CardDescription>
+          </div>
+          <div className="text-right">
+            <p className="text-sm font-medium text-muted-foreground">Total P&L</p>
+            <p className={`text-xl font-bold ${getPnlColor(masterPnl)}`}>
+              {masterPnl >= 0 ? "+" : ""}
+              {masterPnl.toFixed(2)}
+            </p>
+          </div>
         </CardHeader>
-        <CardContent>
-          {livePositions.length > 0 ? (
+        {!foldedState['master'] && (
+          <CardContent>
+            {livePositions.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -317,19 +352,6 @@ export default function GroupedPositions() {
                   );
                 })}
               </TableBody>
-              {/* Footer Row for Master P&L */}
-              <TableBody>
-                <TableRow className="bg-muted/50 font-semibold hover:bg-muted/50">
-                  <TableCell colSpan={7} className="text-right">
-                    Total Account P&L
-                  </TableCell>
-                  <TableCell className={`text-right ${getPnlColor(masterPnl)}`}>
-                    {masterPnl >= 0 ? "+" : ""}
-                    {masterPnl.toFixed(2)}
-                  </TableCell>
-                  <TableCell />
-                </TableRow>
-              </TableBody>
             </Table>
           ) : (
             <p className="py-8 text-center text-sm text-muted-foreground">
@@ -337,6 +359,7 @@ export default function GroupedPositions() {
             </p>
           )}
         </CardContent>
+        )}
       </Card>
 
       {/* Group Tables */}
@@ -352,20 +375,34 @@ export default function GroupedPositions() {
         if (groupPositions.length === 0) {
            return (
             <Card key={group.id}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div>
-                  <CardTitle>{group.name}</CardTitle>
+              <CardHeader 
+                className="cursor-pointer select-none flex flex-row items-start justify-between space-y-0 pb-4 transition-colors hover:bg-muted/30"
+                onClick={() => toggleFold(group.id.toString())}
+              >
+                <div className="flex flex-col gap-1.5">
+                  <CardTitle className="flex items-center gap-2">
+                    {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
+                    {group.name}
+                  </CardTitle>
                   <CardDescription>Empty Strategy Group</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => setGroupToDelete(group)} className="text-destructive">
-                  Delete Group
-                </Button>
+                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
+                    <p className="text-xl font-bold text-muted-foreground">0.00</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setGroupToDelete(group)} className="text-destructive hover:bg-destructive/10">
+                    Delete Group
+                  </Button>
+                </div>
               </CardHeader>
-              <CardContent>
-                <p className="py-4 text-center text-sm text-muted-foreground">
-                  No open positions in this group.
-                </p>
-              </CardContent>
+              {!foldedState[group.id.toString()] && (
+                <CardContent>
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    No open positions in this group.
+                  </p>
+                </CardContent>
+              )}
             </Card>
            )
         }
@@ -374,17 +411,33 @@ export default function GroupedPositions() {
 
         return (
           <Card key={group.id}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle>{group.name}</CardTitle>
+            <CardHeader 
+              className="cursor-pointer select-none flex flex-row items-start justify-between space-y-0 pb-4 transition-colors hover:bg-muted/30"
+              onClick={() => toggleFold(group.id.toString())}
+            >
+              <div className="flex flex-col gap-1.5">
+                <CardTitle className="flex items-center gap-2">
+                  {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
+                  {group.name}
+                </CardTitle>
                 <CardDescription>{groupPositions.length} position{groupPositions.length !== 1 ? 's' : ''}</CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setGroupToDelete(group)} className="text-destructive hover:bg-destructive/10">
-                Delete Group
-              </Button>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
+                  <p className={`text-xl font-bold ${getPnlColor(groupPnl)}`}>
+                    {groupPnl >= 0 ? "+" : ""}
+                    {groupPnl.toFixed(2)}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setGroupToDelete(group)} className="text-destructive hover:bg-destructive/10">
+                  Delete Group
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
-              <Table>
+            {!foldedState[group.id.toString()] && (
+              <CardContent>
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Symbol</TableHead>
@@ -428,21 +481,9 @@ export default function GroupedPositions() {
                     );
                   })}
                 </TableBody>
-                {/* Footer Row for Group P&L */}
-                <TableBody>
-                  <TableRow className="bg-muted/50 font-semibold hover:bg-muted/50">
-                    <TableCell colSpan={6} className="text-right">
-                      Group P&L
-                    </TableCell>
-                    <TableCell className={`text-right ${getPnlColor(groupPnl)}`}>
-                      {groupPnl >= 0 ? "+" : ""}
-                      {groupPnl.toFixed(2)}
-                    </TableCell>
-                    <TableCell />
-                  </TableRow>
-                </TableBody>
               </Table>
             </CardContent>
+          )}
           </Card>
         );
       })}
