@@ -18,6 +18,7 @@ import ApiKey from "@/pages/ApiKey";
 import OrderBook from "@/pages/OrderBook";
 import TradeBook from "@/pages/TradeBook";
 import Positions from "@/pages/Positions";
+import GroupedPositions from "@/pages/GroupedPositions";
 import Holdings from "@/pages/Holdings";
 import Search from "@/pages/Search";
 import WebSocketTest from "@/pages/WebSocketTest";
@@ -159,6 +160,14 @@ function App() {
                   element={
                     <ProtectedRoute requiresBroker>
                       <Positions />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/grouped-positions"
+                  element={
+                    <ProtectedRoute requiresBroker>
+                      <GroupedPositions />
                     </ProtectedRoute>
                   }
                 />

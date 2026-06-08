@@ -63,6 +63,7 @@ def _import_all_models() -> None:
     import backend.models.audit  # noqa: F401  (login_attempts, active_sessions, error_logs, api_logs)
     import backend.models.sandbox  # noqa: F401  (sandbox_*)
     import backend.models.strategies  # noqa: F401  (saved option strategies)
+    import backend.models.position_groups  # noqa: F401 (strategy manager)
 
 
 def step_create_all(engine) -> None:

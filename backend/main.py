@@ -251,12 +251,14 @@ from backend.routers.orderbook import router as orderbook_router
 from backend.routers.tradebook import router as tradebook_router
 from backend.routers.positions import router as positions_router
 from backend.routers.holdings import router as holdings_router
+from backend.api.position_groups import router as position_groups_router
 
 app.include_router(dashboard_router)
 app.include_router(orderbook_router)
 app.include_router(tradebook_router)
 app.include_router(positions_router)
 app.include_router(holdings_router)
+app.include_router(position_groups_router)
 
 # Phase 5: API key management and external API
 from backend.routers.api_key import router as api_key_router

@@ -14,6 +14,7 @@ from backend.models.strategy_module import (
     SmWebhookEvent,
     SmStrategyEvent,
 )
+from backend.models.position_groups import PositionGroup, PositionGroupMapping
 
 __all__ = [
     "Base",
@@ -32,4 +33,6 @@ __all__ = [
     "SmStrategyCheckpoint",
     "SmWebhookEvent",
     "SmStrategyEvent",
+    "PositionGroup",
+    "PositionGroupMapping",
 ]

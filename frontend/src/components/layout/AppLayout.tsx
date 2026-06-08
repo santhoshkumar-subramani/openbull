@@ -58,11 +58,12 @@ const navItems: NavItem[] = [
   },
   {
     label: "Portfolio",
-    matches: ["/positions", "/holdings"],
+    matches: ["/positions", "/holdings", "/grouped-positions"],
     groups: [
       {
         items: [
           { label: "Positions", to: "/positions", hint: "Intraday & overnight" },
+          { label: "Grouped Positions", to: "/grouped-positions", hint: "Manage positions by strategy" },
           { label: "Holdings", to: "/holdings", hint: "Long-term inventory" },
         ],
       },
