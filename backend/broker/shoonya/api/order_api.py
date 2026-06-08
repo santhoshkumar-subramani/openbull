@@ -102,6 +102,36 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
     Returns:
         (response, response_data, order_id)
     """
+    # Shoonya officially blocks MARKET orders for options/MCX. We intercept
+    # and convert them to a LIMIT order with a 5% buffer from current LTP.
+    exchange = str(data.get("exchange", ""))
+    pricetype = str(data.get("pricetype", ""))
+    
+    if exchange in ("NFO", "BFO", "MCX") and pricetype == "MARKET":
+        try:
+            from backend.broker.shoonya.api.data import get_quotes
+            symbol = str(data.get("symbol", ""))
+            quote = get_quotes(symbol, exchange, auth_token, config)
+            ltp = quote.get("ltp", 0.0)
+            if ltp > 0:
+                action = str(data.get("action", "BUY")).upper()
+                buffer_pct = 0.05
+                if action == "BUY":
+                    fallback_price = ltp * (1.0 + buffer_pct)
+                else:
+                    fallback_price = ltp * (1.0 - buffer_pct)
+                
+                # Round to nearest 0.05 tick size
+                fallback_price = round(fallback_price / 0.05) * 0.05
+                
+                # Make a shallow copy so we don't mutate the caller's dict unexpectedly
+                data = data.copy()
+                data["pricetype"] = "LIMIT"
+                data["price"] = round(fallback_price, 2)
+                logger.info("Shoonya Market Order Fallback: %s %s converted to LIMIT at %.2f (LTP %.2f)", action, symbol, fallback_price, ltp)
+        except Exception as e:
+            logger.warning("Shoonya MARKET order fallback failed to get quote for %s: %s", data.get("symbol"), e)
+
     uid, jkey, actid = _split_token(auth_token)
 
     payload = transform_data(data, "")
