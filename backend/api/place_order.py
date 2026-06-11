@@ -10,6 +10,7 @@ import logging
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
 
 from backend.services.order_service import (
     place_order,
@@ -66,7 +67,8 @@ async def api_place_order(request: Request):
         "strategy": body.get("strategy", ""),
     }
 
-    success, response_data, status_code = place_order(
+    success, response_data, status_code = await run_in_threadpool(
+        place_order,
         order_data=order_data,
         auth_token=auth_token,
         broker=broker_name,
@@ -103,7 +105,8 @@ async def api_place_smart_order(request: Request):
         "position_size": body.get("position_size", "0"),
     }
 
-    success, response_data, status_code = place_smart_order(
+    success, response_data, status_code = await run_in_threadpool(
+        place_smart_order,
         order_data=order_data,
         auth_token=auth_token,
         broker=broker_name,
@@ -136,7 +139,8 @@ async def api_modify_order(request: Request):
         "disclosed_quantity": body.get("disclosed_quantity", "0"),
     }
 
-    success, response_data, status_code = modify_order_service(
+    success, response_data, status_code = await run_in_threadpool(
+        modify_order_service,
         data=modify_data,
         auth_token=auth_token,
         broker=broker_name,
@@ -168,7 +172,8 @@ async def api_cancel_order(request: Request):
             status_code=400,
         )
 
-    success, response_data, status_code = cancel_order_service(
+    success, response_data, status_code = await run_in_threadpool(
+        cancel_order_service,
         orderid=orderid,
         auth_token=auth_token,
         broker=broker_name,
@@ -193,7 +198,8 @@ async def api_cancel_all_orders(request: Request):
     body = await _get_request_body(request)
     _strategy = body.get("strategy", "")
 
-    success, response_data, status_code = cancel_all_orders_service(
+    success, response_data, status_code = await run_in_threadpool(
+        cancel_all_orders_service,
         auth_token=auth_token,
         broker=broker_name,
         config=config,
@@ -218,7 +224,8 @@ async def api_close_all_positions(request: Request):
     # OpenAlgo accepts an optional `strategy` for telemetry — read but unused.
     _strategy = body.get("strategy", "")
 
-    success, response_data, status_code = close_all_positions_service(
+    success, response_data, status_code = await run_in_threadpool(
+        close_all_positions_service,
         api_key=api_key,
         auth_token=auth_token,
         broker=broker_name,

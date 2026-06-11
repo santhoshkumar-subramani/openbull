@@ -69,7 +69,9 @@ async def api_option_symbol(request: Request):
             status_code=400,
         )
 
-    success, response_data, status_code = get_option_symbol(
+    from fastapi.concurrency import run_in_threadpool
+    success, response_data, status_code = await run_in_threadpool(
+        get_option_symbol,
         underlying=underlying,
         exchange=exchange,
         expiry_date=expiry_date,

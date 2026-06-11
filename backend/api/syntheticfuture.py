@@ -48,7 +48,9 @@ async def api_synthetic_future(request: Request):
             status_code=400,
         )
 
-    success, response_data, status_code = calculate_synthetic_future(
+    from fastapi.concurrency import run_in_threadpool
+    success, response_data, status_code = await run_in_threadpool(
+        calculate_synthetic_future,
         underlying=underlying, exchange=exchange, expiry_date=expiry_date,
         auth_token=auth_token, broker=broker_name, config=config,
     )

@@ -41,7 +41,9 @@ async def api_positions(request: Request):
 
     user_id, auth_token, broker_name, config = api_user
 
-    success, response_data, status_code = get_positions_with_auth(
+    from fastapi.concurrency import run_in_threadpool
+    success, response_data, status_code = await run_in_threadpool(
+        get_positions_with_auth,
         auth_token=auth_token,
         broker=broker_name,
         config=config,
