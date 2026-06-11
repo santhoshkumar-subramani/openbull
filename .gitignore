@@ -56,3 +56,7 @@ htmlcov/
 *.pem
 *.key
 credentials.json
+
+# Temporary and Test files
+tmp/
+test_scripts/
