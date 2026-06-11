@@ -23,11 +23,14 @@ Wire protocol (Shoonya / Noren WebSocket):
 
 import json
 import logging
+import re
 import ssl
 import threading
 import time
 
 import websocket
+
+OPTION_PATTERN = re.compile(r'[CP]\d+$')
 
 from backend.broker.upstox.mapping.order_data import (
     get_symbol_exchange_from_token,
@@ -42,7 +45,7 @@ from backend.websocket_proxy.base_adapter import (
 
 logger = logging.getLogger("shoonya_stream")
 
-SHOONYA_WS_URL = "wss://api.shoonya.com/NorenWSTP/"
+SHOONYA_WS_URL = "wss://api.shoonya.com/NorenWSAPI/"
 
 # Reconnect / health-check tuning.
 RECONNECT_MAX_TRIES = 50
@@ -246,10 +249,10 @@ class ShoonyaAdapter(BaseBrokerAdapter):
 
         # Authenticate.
         auth_msg = json.dumps({
-            "t": "c",
+            "t": "a",
             "uid": self._uid,
             "actid": self._actid,
-            "susertoken": self._susertoken,
+            "accesstoken": self._susertoken,
             "source": "API",
         })
         try:
@@ -276,7 +279,7 @@ class ShoonyaAdapter(BaseBrokerAdapter):
         msg_type = data.get("t", "")
 
         # Connection acknowledgement.
-        if msg_type == "ck":
+        if msg_type == "ak":
             status = data.get("s", "")
             if status == "OK":
                 logger.info("Shoonya WS authenticated")
@@ -289,14 +292,36 @@ class ShoonyaAdapter(BaseBrokerAdapter):
                 self._mark_fatal_error(data.get("emsg", "Authentication failed"))
             return
 
-        # Touchline snapshot / update.
-        if msg_type in ("tk", "tf"):
-            self._process_touchline(data)
-            return
+        # Touchline / Depth updates.
+        if msg_type in ("tk", "tf", "dk", "df"):
+            if "lp" in data:
+                token = data.get("tk", "")
+                if token:
+                    info = self._token_to_se.get(token)
+                    if not info:
+                        info = get_symbol_exchange_from_token(token)
+                    if info:
+                        symbol, exchange = info
+                        # Removed generic > 10000 log as it spams for indices and high-priced stocks.
+                        if exchange in ("NFO", "BFO", "MCX"):
+                            try:
+                                new_lp = float(data["lp"] or 0)
+                                if new_lp > 10000:
+                                    is_option = symbol.endswith('CE') or symbol.endswith('PE') or bool(OPTION_PATTERN.search(symbol)) or "OPT" in symbol
+                                    if is_option:
+                                        state = self._tick_state.get(token, {})
+                                        prev_lp = float(state.get("lp", 0) or 0)
+                                        if prev_lp == 0 or prev_lp < 5000:
+                                            logger.warning("Shoonya Websocket [%s] bug detected: Absurd lp %s for option %s. Raw tick data: %s", msg_type, new_lp, symbol, json.dumps(data))
+                                            del data["lp"]
+                            except Exception as e:
+                                import traceback
+                                logger.error("Shoonya WS filter crashed! Error: %s", traceback.format_exc())
 
-        # Depth snapshot / update.
-        if msg_type in ("dk", "df"):
-            self._process_depth(data)
+            if msg_type in ("tk", "tf"):
+                self._process_touchline(data)
+            else:
+                self._process_depth(data)
             return
 
         # Order update — log only.
@@ -481,7 +506,7 @@ class ShoonyaAdapter(BaseBrokerAdapter):
             if not self._running or not self._connected:
                 break
             if self._last_msg_time and (time.time() - self._last_msg_time) > DATA_STALL_TIMEOUT:
-                logger.error(
+                logger.info(
                     "Shoonya data stall (>%ds). Forcing reconnect.", DATA_STALL_TIMEOUT
                 )
                 if self._ws:
