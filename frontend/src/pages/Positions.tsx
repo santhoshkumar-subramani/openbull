@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import { getPositions } from "@/api/dashboard";
 import { closeAllPositions } from "@/api/orders";
-import { placeOrder } from "@/api/optionchain";
+import { placeSmartOrder } from "@/api/optionchain";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -83,7 +83,7 @@ export default function Positions() {
       }
       const action: "BUY" | "SELL" = pos.quantity > 0 ? "SELL" : "BUY";
       const product = (pos.product || "MIS") as "MIS" | "NRML" | "CNC";
-      return placeOrder({
+      return placeSmartOrder({
         symbol: pos.symbol,
         exchange: pos.exchange,
         action,
@@ -91,6 +91,7 @@ export default function Positions() {
         pricetype: "MARKET",
         product,
         strategy: "Close Position",
+        position_size: 0,
       });
     },
     onSuccess: (resp, pos) => {

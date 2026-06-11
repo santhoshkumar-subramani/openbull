@@ -397,6 +397,9 @@ async def _finalize_broker_auth(
         active_session.broker = broker_name
         await db.commit()
 
+    from backend.dependencies import invalidate_user_cache
+    await invalidate_user_cache(user_id)
+
     new_token = create_access_token(data={
         "sub": str(user_id),
         "username": username,

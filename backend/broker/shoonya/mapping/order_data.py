@@ -6,6 +6,7 @@ Numeric-type rules: numbers stay numbers (frontend calls .toFixed(2)).
 Defensive casts use float(value or 0.0) / int(value or 0).
 """
 
+import json
 import logging
 
 from backend.broker.shoonya.mapping.transform_data import (
@@ -243,6 +244,25 @@ def transform_positions_data(positions_data: list[dict]) -> list[dict]:
             ltp = float(pos.get("lp") or 0.0)
         except (TypeError, ValueError):
             ltp = 0.0
+
+        tsym = pos.get("tsym", "")
+        # Fallback to market_data_cache if websocket is active.
+        try:
+            from backend.services.market_data_cache import get_ltp_value
+            cached_ltp = get_ltp_value(tsym, pos.get("exch", ""))
+            if cached_ltp is not None and cached_ltp > 0:
+                ltp = cached_ltp
+        except Exception:
+            pass
+
+        # Shoonya sometimes returns the underlying index price in 'lp' for NFO options.
+        # This global check catches it whether it came from the REST response or a poisoned cache.
+        import re
+        is_option = tsym.endswith('CE') or tsym.endswith('PE') or bool(re.search(r'[CP]\d+$', tsym)) or pos.get("instname", "").startswith("OPT")
+        if ltp > 10000 and is_option:
+            if avg_price == 0 or avg_price < 5000:
+                logger.warning("Shoonya PositionBook bug detected: Absurd ltp %s for option %s. Raw pos: %s", ltp, tsym, json.dumps(pos))
+                ltp = 0.0
 
         # PNL: Shoonya provides urmtom (unrealized) + rpnl (realized).
         try:

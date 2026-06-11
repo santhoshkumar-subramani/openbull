@@ -92,9 +92,21 @@ def get_quotes(
     api_exch = _api_exchange(exchange)
     payload = {"uid": uid, "exch": api_exch, "token": token}
 
+    logger.info("SHOONYA GetQuotes REQUEST: symbol=%s, exchange=%s -> Sending payload: %s", symbol, exchange, payload)
+
     result = _post("GetQuotes", payload, jkey)
     if result.get("stat") != "Ok":
         raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
+
+    ltp = float(result.get("lp", 0) or 0)
+    
+    # Shoonya API bug: returns underlying index price for options.
+    if ltp > 10000:
+        import re
+        is_option = symbol.endswith('CE') or symbol.endswith('PE') or bool(re.search(r'[CP]\d+$', symbol)) or "OPT" in symbol
+        if is_option:
+            logger.warning("Shoonya GetQuotes (data.py) bug detected: Absurd lp %s for option %s. Raw quote: %s", ltp, symbol, json.dumps(result))
+            ltp = 0.0
 
     return {
         "bid": float(result.get("bp1", 0) or 0),
@@ -102,7 +114,7 @@ def get_quotes(
         "open": float(result.get("o", 0) or 0),
         "high": float(result.get("h", 0) or 0),
         "low": float(result.get("l", 0) or 0),
-        "ltp": float(result.get("lp", 0) or 0),
+        "ltp": ltp,
         "prev_close": float(result.get("c", 0) or 0),
         "volume": int(result.get("v", 0) or 0),
         "oi": int(result.get("oi", 0) or 0),

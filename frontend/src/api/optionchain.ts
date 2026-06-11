@@ -68,3 +68,12 @@ export async function placeOrder(req: Omit<PlaceOrderRequest, "apikey">): Promis
   });
   return response.data;
 }
+
+export async function placeSmartOrder(req: Omit<PlaceOrderRequest & { position_size: number }, "apikey">): Promise<PlaceOrderResponse> {
+  const apikey = await resolveApiKey();
+  const response = await api.post<PlaceOrderResponse>("/api/v1/placesmartorder", {
+    apikey,
+    ...req,
+  });
+  return response.data;
+}

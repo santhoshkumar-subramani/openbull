@@ -500,16 +500,43 @@ class MarketDataCache:
                     )
 
     def _mirror_to_redis(self, key: str, entry: dict[str, Any]) -> None:
-        """Fire-and-forget Redis write. Safe from any thread."""
+        """Fire-and-forget Redis write using a batched background worker."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return  # no loop on this thread — skip mirror
-        loop.call_soon_threadsafe(
-            lambda: asyncio.create_task(
-                cache_set_json(f"md:{key}", entry, REDIS_CACHE_TTL)
-            )
-        )
+
+        if not getattr(self, "_redis_queue_initialized", False):
+            self._redis_queue_initialized = True
+            self._redis_queue = asyncio.Queue(maxsize=50000)
+            self._redis_task = loop.create_task(self._redis_worker())
+
+        try:
+            self._redis_queue.put_nowait((key, entry))
+        except asyncio.QueueFull:
+            pass  # Drop tick safely if the background worker is completely overwhelmed
+
+    async def _redis_worker(self) -> None:
+        from backend.utils.redis_client import cache_mset_json
+        while True:
+            try:
+                key, entry = await self._redis_queue.get()
+                
+                batch = {f"md:{key}": entry}
+                
+                # Drain the queue up to a certain batch size
+                while not self._redis_queue.empty() and len(batch) < 1000:
+                    try:
+                        k, e = self._redis_queue.get_nowait()
+                        batch[f"md:{k}"] = e
+                    except asyncio.QueueEmpty:
+                        break
+                
+                await cache_mset_json(batch, REDIS_CACHE_TTL)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.exception("Redis worker error: %s", e)
 
     def _health_loop(self) -> None:
         while not self._health_stop.wait(HEALTH_CHECK_INTERVAL):

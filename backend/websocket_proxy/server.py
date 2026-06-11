@@ -253,6 +253,17 @@ async def _handle_client(ws: websockets.WebSocketServerProtocol) -> None:
 
                 # Create adapter if needed (single-user: one adapter at a time)
                 async with _adapter_lock:
+                    if _adapter is not None:
+                        # If the existing adapter crashed with a fatal error or uses a different token, recreate it
+                        if getattr(_adapter, "_fatal_error", False) or getattr(_adapter, "auth_token", getattr(_adapter, "_susertoken", None)) != auth_token:
+                            logger.info("Auth token changed or previous adapter crashed. Recreating adapter.")
+                            try:
+                                _adapter.disconnect()
+                                _adapter.cleanup_zmq()
+                            except Exception:
+                                pass
+                            _adapter = None
+
                     if _adapter is None:
                         try:
                             _adapter = _create_adapter(broker_name, auth_token, config)

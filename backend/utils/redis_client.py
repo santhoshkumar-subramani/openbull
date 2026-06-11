@@ -32,6 +32,7 @@ def get_redis() -> redis.Redis:
             decode_responses=True,
             socket_connect_timeout=2,
             socket_timeout=2,
+            max_connections=50,
         )
         logger.info("Redis client initialized at %s", settings.redis_url)
     return _client
@@ -75,6 +76,26 @@ async def cache_set_json(key: str, value: Any, ttl_seconds: int) -> bool:
     except Exception as e:
         logger.warning("Redis SET failed for %s: %s", key, e)
         return False
+
+
+async def cache_mset_json(mapping: dict[str, Any], ttl_seconds: int) -> int:
+    """Bulk SET JSON-encoded values using a pipeline. Returns number of keys written."""
+    if not mapping:
+        return 0
+    client = get_redis()
+    try:
+        async with client.pipeline(transaction=False) as pipe:
+            for k, v in mapping.items():
+                payload = json.dumps(v)
+                if ttl_seconds and ttl_seconds > 0:
+                    pipe.set(_k(k), payload, ex=ttl_seconds)
+                else:
+                    pipe.set(_k(k), payload)
+            await pipe.execute()
+        return len(mapping)
+    except Exception as e:
+        logger.warning("Redis MSET failed: %s", e)
+        return 0
 
 
 async def cache_delete(*keys: str) -> int:

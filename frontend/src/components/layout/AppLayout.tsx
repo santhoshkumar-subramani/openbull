@@ -1,4 +1,7 @@
 import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getPositions } from "@/api/dashboard";
+import { useLivePrice } from "@/hooks/useLivePrice";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -468,6 +471,40 @@ function MobileNav() {
 }
 
 // ---------------------------------------------------------------------------
+// Live Page Title
+// ---------------------------------------------------------------------------
+
+function LivePageTitle() {
+  const { user } = useAuth();
+  const isAuthenticated = !!user;
+
+  const { data: positions } = useQuery({
+    queryKey: ["dashboard", "positions"],
+    queryFn: getPositions,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+    enabled: isAuthenticated,
+  });
+
+  // Calculate live price only for positions to avoid unnecessary WS load
+  const { data: livePositions } = useLivePrice(positions || [], {
+    enabled: isAuthenticated && (positions || []).length > 0,
+  });
+
+  useEffect(() => {
+    if (!isAuthenticated || !livePositions || livePositions.length === 0) {
+      document.title = "OpenBull";
+      return;
+    }
+    const totalPnl = livePositions.reduce((acc, pos) => acc + (pos.pnl ?? 0), 0);
+    const sign = totalPnl > 0 ? "+" : "";
+    document.title = `${sign}${totalPnl.toFixed(2)} | OpenBull`;
+  }, [livePositions, isAuthenticated]);
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Layout shell
 // ---------------------------------------------------------------------------
 
@@ -482,6 +519,7 @@ export function AppLayout() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
+      <LivePageTitle />
       {/* Top navbar */}
       <header
         className={cn(

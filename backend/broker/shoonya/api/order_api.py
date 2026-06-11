@@ -110,9 +110,51 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
     if exchange in ("NFO", "BFO", "MCX") and pricetype == "MARKET":
         try:
             from backend.broker.shoonya.api.data import get_quotes
+            from backend.services.market_data_cache import get_ltp_value
+            from backend.broker.shoonya.mapping.transform_data import map_product_type
+            
             symbol = str(data.get("symbol", ""))
-            quote = get_quotes(symbol, exchange, auth_token, config)
-            ltp = quote.get("ltp", 0.0)
+            
+            # 1. Try to get LTP from live websocket cache
+            ltp = get_ltp_value(symbol, exchange) or 0.0
+            
+            # 2. Fallback to Shoonya REST API GetQuotes
+            if ltp == 0.0:
+                quote = get_quotes(symbol, exchange, auth_token, config)
+                ltp = quote.get("ltp", 0.0)
+                # Shoonya REST API bug: it sometimes returns underlying index price for options.
+                if ltp > 10000:
+                    import re
+                    is_option = symbol.endswith('CE') or symbol.endswith('PE') or bool(re.search(r'[CP]\d+$', symbol)) or "OPT" in symbol
+                    if is_option:
+                        logger.warning("Shoonya GetQuotes (REST) bug detected: Absurd lp %s for option %s. Raw quote data: %s", ltp, symbol, json.dumps(quote))
+                        ltp = 0.0
+                    
+            # 3. Fallback to open position average price (if closing position)
+            if ltp == 0.0:
+                try:
+                    shoonya_product = map_product_type(data.get("product", "MIS"))
+                    positions_data = _get_cached_positions(auth_token)
+                    if positions_data and positions_data.get("status") and positions_data.get("data"):
+                        for pos in positions_data["data"]:
+                            # For options, we might need to check if tsym starts with symbol or matches
+                            # OpenBull symbols usually match tsym in fallback cases
+                            pos_sym = pos.get("tsym", "")
+                            # For safety, let's also allow a prefix match
+                            if pos_sym == symbol or (pos.get("exch") == exchange and symbol in pos_sym):
+                                upldprc = float(pos.get("upldprc") or 0.0)
+                                if upldprc > 0.0:
+                                    ltp = upldprc
+                                else:
+                                    dayavgprc = float(pos.get("dayavgprc") or 0.0)
+                                    if dayavgprc > 0.0:
+                                        ltp = dayavgprc
+                                    else:
+                                        ltp = float(pos.get("netavgprc") or 0.0)
+                                break
+                except Exception as e:
+                    logger.warning("Failed to get average price for MARKET order fallback: %s", e)
+
             if ltp > 0:
                 action = str(data.get("action", "BUY")).upper()
                 buffer_pct = 0.05
@@ -352,7 +394,7 @@ def get_open_position(
     br_symbol = get_brsymbol_from_cache(tradingsymbol, exchange) or tradingsymbol
     positions_data = _get_cached_positions(auth_token)
 
-    net_qty = "0"
+    net_qty = 0
     if positions_data and positions_data.get("status") and positions_data.get("data"):
         for position in positions_data["data"]:
             if (
@@ -360,9 +402,12 @@ def get_open_position(
                 and position.get("exch") == exchange
                 and position.get("prd") == product
             ):
-                net_qty = str(position.get("netqty", "0"))
+                try:
+                    net_qty = int(position.get("netqty", 0) or 0)
+                except (TypeError, ValueError):
+                    net_qty = 0
                 break
-    return net_qty
+    return str(net_qty)
 
 
 # ---- Order Book ----
