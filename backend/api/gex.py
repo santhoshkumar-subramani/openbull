@@ -19,6 +19,7 @@ async def api_gex(request: Request):
     """Compute Gamma Exposure (GEX) per strike for an underlying + expiry."""
     from backend.dependencies import get_api_user, get_db
     from backend.services.gex_service import get_gex_data
+    from starlette.concurrency import run_in_threadpool
 
     try:
         async for db in get_db():
@@ -48,7 +49,8 @@ async def api_gex(request: Request):
             status_code=400,
         )
 
-    success, response_data, status_code = get_gex_data(
+    success, response_data, status_code = await run_in_threadpool(
+        get_gex_data,
         underlying=underlying,
         exchange=exchange,
         expiry_date=expiry_date,
