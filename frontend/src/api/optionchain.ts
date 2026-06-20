@@ -32,11 +32,18 @@ export async function fetchOptionChain(params: {
   strike_count: number;
 }): Promise<OptionChainResponse> {
   const apikey = await resolveApiKey();
-  const response = await api.post<OptionChainResponse>("/api/v1/optionchain", {
-    apikey,
-    ...params,
-  });
-  return response.data;
+  try {
+    const response = await api.post<OptionChainResponse>("/api/v1/optionchain", {
+      apikey,
+      ...params,
+    });
+    return response.data;
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      return { status: "error", message: "Not found" } as any;
+    }
+    throw error;
+  }
 }
 
 export async function fetchExpiries(params: {
@@ -45,12 +52,20 @@ export async function fetchExpiries(params: {
   instrumenttype?: string;
 }): Promise<ExpiryResponse> {
   const apikey = await resolveApiKey();
-  const response = await api.post<ExpiryResponse>("/api/v1/expiry", {
-    apikey,
-    instrumenttype: params.instrumenttype ?? "options",
-    ...params,
-  });
-  return response.data;
+  try {
+    const response = await api.post<ExpiryResponse>("/api/v1/expiry", {
+      apikey,
+      instrumenttype: params.instrumenttype ?? "options",
+      ...params,
+    });
+    return response.data;
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      // Return a successful but empty response so the UI gracefully skips it
+      return { status: "success", data: [] } as any;
+    }
+    throw error;
+  }
 }
 
 export async function fetchUnderlyings(exchange: FnoExchange): Promise<UnderlyingsResponse> {

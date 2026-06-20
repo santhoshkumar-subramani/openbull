@@ -217,13 +217,18 @@ async def get_api_user(
         result = await db.execute(select(ApiKey))
         api_keys = result.scalars().all()
 
-        for ak in api_keys:
-            if verify_api_key(provided_key, ak.api_key_hash):
-                user_id = ak.user_id
-                await cache_set_json(_key_api_valid(key_hash), user_id, API_KEY_TTL)
-                break
+        import asyncio
+        def _find_valid_key(pkey: str, keys: list) -> int | None:
+            for ak in keys:
+                if verify_api_key(pkey, ak.api_key_hash):
+                    return ak.user_id
+            return None
 
-        if user_id is None:
+        user_id = await asyncio.to_thread(_find_valid_key, provided_key, api_keys)
+
+        if user_id is not None:
+            await cache_set_json(_key_api_valid(key_hash), user_id, API_KEY_TTL)
+        else:
             await cache_set_json(_key_api_invalid(key_hash), 1, INVALID_KEY_TTL)
             raise HTTPException(status_code=401, detail="Invalid API key")
 
