@@ -186,9 +186,33 @@ def get_market_depth(
     api_exch = _api_exchange(exchange)
     payload = {"uid": uid, "exch": api_exch, "token": token}
 
-    result = _post("GetQuotes", payload, jkey)
-    if result.get("stat") != "Ok":
-        raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
+    max_attempts = 3
+    result = {}
+    for attempt in range(max_attempts):
+        result = _post("GetQuotes", payload, jkey)
+        if result.get("stat") != "Ok":
+            raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
+            
+        resp_token = result.get("token")
+        if str(resp_token) == str(token):
+            break
+            
+        logger.warning(
+            "Shoonya GetMarketDepth token mismatch (attempt %d/%d). Requested: %s, Got: %s for %s.", 
+            attempt + 1, max_attempts, token, resp_token, symbol
+        )
+        if attempt < max_attempts - 1:
+            time.sleep(0.1)
+
+    if str(result.get("token")) != str(token):
+        logger.error("Shoonya GetMarketDepth failed to return correct token after %d attempts for %s.", max_attempts, symbol)
+        # Return empty data instead of corrupted index depth
+        return {
+            "bids": [], "asks": [],
+            "high": 0.0, "low": 0.0, "ltp": 0.0, "ltq": 0,
+            "open": 0.0, "prev_close": 0.0, "close": 0.0,
+            "volume": 0, "oi": 0, "totalbuyqty": 0, "totalsellqty": 0
+        }
 
     bids: list[dict] = []
     asks: list[dict] = []
