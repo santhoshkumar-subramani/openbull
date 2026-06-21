@@ -122,13 +122,6 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
             if ltp == 0.0:
                 quote = get_quotes(symbol, exchange, auth_token, config)
                 ltp = quote.get("ltp", 0.0)
-                # Shoonya REST API bug: it sometimes returns underlying index price for options.
-                if ltp > 10000:
-                    import re
-                    is_option = symbol.endswith('CE') or symbol.endswith('PE') or bool(re.search(r'[CP]\d+$', symbol)) or "OPT" in symbol
-                    if is_option:
-                        logger.warning("Shoonya GetQuotes (REST) bug detected: Absurd lp %s for option %s. Raw quote data: %s", ltp, symbol, json.dumps(quote))
-                        ltp = 0.0
                     
             # 3. Fallback to open position average price (if closing position)
             if ltp == 0.0:
@@ -137,10 +130,7 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
                     positions_data = _get_cached_positions(auth_token)
                     if positions_data and positions_data.get("status") and positions_data.get("data"):
                         for pos in positions_data["data"]:
-                            # For options, we might need to check if tsym starts with symbol or matches
-                            # OpenBull symbols usually match tsym in fallback cases
                             pos_sym = pos.get("tsym", "")
-                            # For safety, let's also allow a prefix match
                             if pos_sym == symbol or (pos.get("exch") == exchange and symbol in pos_sym):
                                 upldprc = float(pos.get("upldprc") or 0.0)
                                 if upldprc > 0.0:
@@ -171,8 +161,18 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
                 data["pricetype"] = "LIMIT"
                 data["price"] = round(fallback_price, 2)
                 logger.info("Shoonya Market Order Fallback: %s %s converted to LIMIT at %.2f (LTP %.2f)", action, symbol, fallback_price, ltp)
+            else:
+                logger.error("Market to Limit Conversion failed for %s. LTP is 0.0.", symbol)
+                return None, {
+                    "status": "error", 
+                    "message": f"Order Rejected: Failed to fetch valid LTP for MARKET to LIMIT conversion for {symbol}."
+                }, None
         except Exception as e:
             logger.warning("Shoonya MARKET order fallback failed to get quote for %s: %s", data.get("symbol"), e)
+            return None, {
+                "status": "error", 
+                "message": f"Order Rejected: Error during MARKET to LIMIT conversion for {symbol}."
+            }, None
 
     uid, jkey, actid = _split_token(auth_token)
 
@@ -314,6 +314,10 @@ def close_all_positions(current_api_key: str, auth_token: str) -> tuple[dict, in
             _get_oa_symbol_from_brsymbol,
         )
 
+        success_count = 0
+        failure_count = 0
+        last_error = ""
+
         for position in positions_response["data"]:
             try:
                 netqty = int(position.get("netqty", 0) or 0)
@@ -349,9 +353,23 @@ def close_all_positions(current_api_key: str, auth_token: str) -> tuple[dict, in
                 "product": reverse_map_product_type(position.get("prd", "")),
                 "quantity": str(quantity),
             }
-            place_order_api(place_order_payload, auth_token)
+            
+            # place_order_api returns (res, response_data, order_id)
+            res, response_data, order_id = place_order_api(place_order_payload, auth_token)
+            
+            if response_data and response_data.get("status") == "success":
+                success_count += 1
+            else:
+                failure_count += 1
+                last_error = response_data.get("message", "Unknown error") if response_data else "Unknown error"
 
         _invalidate_position_cache(auth_token)
+
+        if failure_count > 0:
+            if success_count == 0:
+                return {"status": "error", "message": f"Failed to close positions: {last_error}"}, 400
+            else:
+                return {"status": "error", "message": f"Partially squared off. {failure_count} failed. Last error: {last_error}"}, 207
 
     return {"status": "success", "message": "All Open Positions SquaredOff"}, 200
 
