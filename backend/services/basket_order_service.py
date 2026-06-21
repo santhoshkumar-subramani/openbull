@@ -159,19 +159,12 @@ def place_basket_order(
         return False, {"status": "error", "message": "Broker-specific module not found"}, 404
 
     results: list[dict] = []
-    total = len(orders_with_meta)
-
-    for batch_start in range(0, total, BATCH_SIZE):
-        if batch_start > 0:
-            time.sleep(BATCH_DELAY_SEC)
-        batch = orders_with_meta[batch_start:batch_start + BATCH_SIZE]
-
-        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-            futures = {
-                executor.submit(_place_single_order, order, broker_module, auth_token): order
-                for order in batch
-            }
-            for future in as_completed(futures):
-                results.append(future.result())
+    
+    # Execute serially to strictly avoid broker concurrency bugs (especially Shoonya state mixing)
+    for idx, order in enumerate(orders_with_meta):
+        if idx > 0:
+            time.sleep(BATCH_DELAY_SEC / BATCH_SIZE) # gentle delay between sequential legs
+        
+        results.append(_place_single_order(order, broker_module, auth_token))
 
     return True, {"status": "success", "results": results}, 200

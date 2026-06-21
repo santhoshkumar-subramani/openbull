@@ -181,33 +181,27 @@ def place_options_multiorder(
     results: list[dict] = []
     total = len(sorted_legs)
 
-    for batch_start in range(0, total, BATCH_SIZE):
-        if batch_start > 0:
-            time.sleep(BATCH_DELAY_SEC)
-        batch = sorted_legs[batch_start:batch_start + BATCH_SIZE]
-
-        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-            futures = {}
-            for leg in batch:
-                order_data = {k: leg[k] for k in (
-                    "symbol", "exchange", "action", "quantity", "pricetype", "product",
-                    "price", "trigger_price", "disclosed_quantity", "strategy",
-                )}
-                leg_meta = {
-                    "leg": leg["leg"], "symbol": leg["symbol"], "action": leg["action"],
-                    "offset": leg["offset"], "option_type": leg["option_type"],
-                }
-                if leg["splitsize"] > 0:
-                    fut = executor.submit(
-                        _place_leg_split,
-                        order_data, leg["splitsize"], auth_token, broker, config, leg_meta,
-                    )
-                else:
-                    fut = executor.submit(_place_leg, order_data, broker_module, auth_token, leg_meta)
-                futures[fut] = leg
-
-            for future in as_completed(futures):
-                results.append(future.result())
+    for idx, leg in enumerate(sorted_legs):
+        if idx > 0:
+            time.sleep(BATCH_DELAY_SEC / BATCH_SIZE)
+            
+        order_data = {k: leg[k] for k in (
+            "symbol", "exchange", "action", "quantity", "pricetype", "product",
+            "price", "trigger_price", "disclosed_quantity", "strategy",
+        )}
+        leg_meta = {
+            "leg": leg["leg"], "symbol": leg["symbol"], "action": leg["action"],
+            "offset": leg["offset"], "option_type": leg["option_type"],
+        }
+        
+        if leg["splitsize"] > 0:
+            res = _place_leg_split(
+                order_data, leg["splitsize"], auth_token, broker, config, leg_meta,
+            )
+        else:
+            res = _place_leg(order_data, broker_module, auth_token, leg_meta)
+            
+        results.append(res)
 
     results.sort(key=lambda r: r["leg"])
 
