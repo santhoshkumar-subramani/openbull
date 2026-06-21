@@ -11,6 +11,7 @@ Public surface (matches openbull contract):
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime
 
@@ -40,6 +41,9 @@ TIMEFRAME_MAP = {
 # Shoonya quote API has no batch mode; throttle serial calls.
 _QUOTE_RATE_DELAY = 0.15
 
+# Global lock to prevent Shoonya backend from mixing up concurrent requests
+_shoonya_api_lock = threading.Lock()
+
 
 def _split_token(auth_token: str) -> tuple[str, str, str]:
     """Split combined ``userid:susertoken:actid``."""
@@ -54,11 +58,12 @@ def _split_token(auth_token: str) -> tuple[str, str, str]:
 def _post(endpoint: str, payload: dict, jkey: str) -> dict:
     payload_str = f"jData={json.dumps(payload)}&jKey={jkey}"
     client = get_httpx_client()
-    response = client.post(
-        f"{BASE_URL}/{endpoint}",
-        content=payload_str,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+    with _shoonya_api_lock:
+        response = client.post(
+            f"{BASE_URL}/{endpoint}",
+            content=payload_str,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
     try:
         return response.json()
     except json.JSONDecodeError:
@@ -94,19 +99,32 @@ def get_quotes(
 
     logger.info("SHOONYA GetQuotes REQUEST: symbol=%s, exchange=%s -> Sending payload: %s", symbol, exchange, payload)
 
-    result = _post("GetQuotes", payload, jkey)
-    if result.get("stat") != "Ok":
-        raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
+    max_attempts = 3
+    result = {}
+    
+    for attempt in range(max_attempts):
+        result = _post("GetQuotes", payload, jkey)
+        if result.get("stat") != "Ok":
+            raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
+
+        resp_token = result.get("token")
+        if str(resp_token) == str(token):
+            break
+            
+        logger.warning(
+            "Shoonya GetQuotes token mismatch (attempt %d/%d). Requested: %s, Got: %s for %s. Raw quote: %s", 
+            attempt + 1, max_attempts, token, resp_token, symbol, json.dumps(result)
+        )
+        if attempt < max_attempts - 1:
+            time.sleep(0.1)
 
     ltp = float(result.get("lp", 0) or 0)
     
-    # Shoonya API bug: returns underlying index price for options.
-    if ltp > 10000:
-        import re
-        is_option = symbol.endswith('CE') or symbol.endswith('PE') or bool(re.search(r'[CP]\d+$', symbol)) or "OPT" in symbol
-        if is_option:
-            logger.warning("Shoonya GetQuotes (data.py) bug detected: Absurd lp %s for option %s. Raw quote: %s", ltp, symbol, json.dumps(result))
-            ltp = 0.0
+    # If after max attempts we still have a mismatch, zero out the LTP to be safe 
+    # and prevent absurd index prices from filling sandbox option orders.
+    if str(result.get("token")) != str(token):
+        logger.error("Shoonya GetQuotes failed to return correct token after %d attempts for %s.", max_attempts, symbol)
+        ltp = 0.0
 
     return {
         "bid": float(result.get("bp1", 0) or 0),
