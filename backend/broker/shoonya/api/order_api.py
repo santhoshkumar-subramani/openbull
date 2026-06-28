@@ -187,7 +187,8 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
     payload["actid"] = actid
 
     response, result = _post_raw("PlaceOrder", payload, jkey)
-    logger.info("Shoonya PlaceOrder response for payload %s: HTTP %s, Result: %s", payload, response.status_code, result)
+    safe_payload = {k: v for k, v in payload.items() if k not in ("uid", "actid")}
+    logger.info("Shoonya PlaceOrder response for payload %s: HTTP %s, Result: %s", safe_payload, response.status_code, result)
 
     # Inject status for service layer validation
     response.status = response.status_code
@@ -278,7 +279,8 @@ def modify_order(data: dict, auth_token: str, config: dict | None = None) -> tup
     payload["uid"] = uid
 
     response, result = _post_raw("ModifyOrder", payload, jkey)
-    logger.info("Shoonya ModifyOrder response for payload %s: HTTP %s, Result: %s", payload, response.status_code, result)
+    safe_payload = {k: v for k, v in payload.items() if k not in ("uid", "actid")}
+    logger.info("Shoonya ModifyOrder response for payload %s: HTTP %s, Result: %s", safe_payload, response.status_code, result)
 
     if result.get("stat") == "Ok":
         orderid = result.get("result", data.get("orderid", ""))
