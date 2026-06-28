@@ -23,6 +23,7 @@ Wire protocol (Shoonya / Noren WebSocket):
 
 import json
 import logging
+import os
 import re
 import ssl
 import threading
@@ -50,9 +51,9 @@ SHOONYA_WS_URL = "wss://api.shoonya.com/NorenWSAPI/"
 # Reconnect / health-check tuning.
 RECONNECT_MAX_TRIES = 50
 RECONNECT_MAX_DELAY = 60
-HEARTBEAT_INTERVAL = 10
-DATA_STALL_TIMEOUT = 90
-HEALTH_CHECK_INTERVAL = 30
+PING_INTERVAL = int(os.getenv("WS_PING_INTERVAL", "30"))
+HEARTBEAT_INTERVAL = int(os.getenv("WS_HEALTH_CHECK_INTERVAL", "30"))
+HEARTBEAT_TIMEOUT = int(os.getenv("WS_HEARTBEAT_TIMEOUT", "120"))
 
 
 def _split_token(auth_token: str) -> tuple[str, str, str]:
@@ -212,7 +213,8 @@ class ShoonyaAdapter(BaseBrokerAdapter):
             try:
                 self._ws.run_forever(
                     sslopt={"cert_reqs": ssl.CERT_NONE},
-                    ping_interval=HEARTBEAT_INTERVAL,
+                    ping_interval=PING_INTERVAL,
+                    ping_timeout=10,
                     ping_payload="ping",
                 )
             except Exception as e:
@@ -496,25 +498,34 @@ class ShoonyaAdapter(BaseBrokerAdapter):
         if self._health_thread and self._health_thread.is_alive():
             return
         self._health_thread = threading.Thread(
-            target=self._health_loop, daemon=True, name="shoonya-health"
+            target=self._heartbeat_worker, daemon=True, name="shoonya-heartbeat"
         )
         self._health_thread.start()
 
-    def _health_loop(self) -> None:
+    def _heartbeat_worker(self) -> None:
         while self._running and self._connected:
-            time.sleep(HEALTH_CHECK_INTERVAL)
+            time.sleep(HEARTBEAT_INTERVAL)
             if not self._running or not self._connected:
                 break
-            if self._last_msg_time and (time.time() - self._last_msg_time) > DATA_STALL_TIMEOUT:
-                logger.info(
-                    "Shoonya data stall (>%ds). Forcing reconnect.", DATA_STALL_TIMEOUT
-                )
-                if self._ws:
-                    try:
-                        self._ws.close()
-                    except Exception:
-                        pass
-                break
+
+            # Send app-level heartbeat
+            try:
+                if self._ws and self._authenticated:
+                    self._ws.send(json.dumps({"t": "h"}))
+            except Exception as e:
+                logger.error("Shoonya heartbeat send error: %s", e)
+
+            # Check connection health
+            self._check_connection_health()
+
+    def _check_connection_health(self) -> None:
+        if self._last_msg_time and (time.time() - self._last_msg_time) > HEARTBEAT_TIMEOUT:
+            logger.info("Shoonya data stall (>%ds). Forcing reconnect.", HEARTBEAT_TIMEOUT)
+            if self._ws:
+                try:
+                    self._ws.close()
+                except Exception:
+                    pass
 
     # ---- Auth-failure detection ----
 

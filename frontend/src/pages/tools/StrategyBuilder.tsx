@@ -823,7 +823,19 @@ export default function StrategyBuilder() {
       toast.error("Add at least one leg with a strike before refreshing");
       return;
     }
-    await refetchSnapshot();
+    const resp = await refetchSnapshot();
+    if (resp && resp.status === "success") {
+      setLegs((prev) =>
+        prev.map((leg) => {
+          const snapLeg = resp.legs.find((sl) => sl.symbol === leg.symbol);
+          if (snapLeg && snapLeg.ltp !== undefined && snapLeg.ltp !== null) {
+            return { ...leg, entry_price: Number(snapLeg.ltp.toFixed(2)) };
+          }
+          return leg;
+        }),
+      );
+      toast.success("Entry prices updated to live market values");
+    }
   }, [snapshotLegs.length, refetchSnapshot]);
 
   const handleSaved = useCallback(

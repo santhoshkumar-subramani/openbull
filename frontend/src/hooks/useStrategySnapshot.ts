@@ -43,7 +43,7 @@ interface Result {
   snapshot: SnapshotResponse | null;
   loading: boolean;
   error: string | null;
-  refetch: () => Promise<void>;
+  refetch: () => Promise<SnapshotResponse | undefined>;
 }
 
 function unwrapErr(e: unknown): string {
@@ -67,11 +67,11 @@ export function useStrategySnapshot({
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
-  const doFetch = useCallback(async (): Promise<void> => {
+  const doFetch = useCallback(async (): Promise<SnapshotResponse | undefined> => {
     if (legs.length === 0) {
       setSnapshot(null);
       setError(null);
-      return;
+      return undefined;
     }
     const reqId = ++requestIdRef.current;
     setLoading(true);
@@ -82,10 +82,11 @@ export function useStrategySnapshot({
         options_exchange,
         legs,
       });
-      if (requestIdRef.current !== reqId) return;
+      if (requestIdRef.current !== reqId) return undefined;
       setSnapshot(resp);
+      return resp;
     } catch (e) {
-      if (requestIdRef.current !== reqId) return;
+      if (requestIdRef.current !== reqId) return undefined;
       setError(unwrapErr(e));
     } finally {
       if (requestIdRef.current === reqId) setLoading(false);
