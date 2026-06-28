@@ -117,11 +117,13 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
             
             # 1. Try to get LTP from live websocket cache
             ltp = get_ltp_value(symbol, exchange) or 0.0
+            price_source = "live websocket cache"
             
             # 2. Fallback to Shoonya REST API GetQuotes
             if ltp == 0.0:
                 quote = get_quotes(symbol, exchange, auth_token, config)
                 ltp = quote.get("ltp", 0.0)
+                price_source = "Shoonya REST API GetQuotes"
                     
             # 3. Fallback to open position average price (if closing position)
             if ltp == 0.0:
@@ -135,17 +137,21 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
                                 upldprc = float(pos.get("upldprc") or 0.0)
                                 if upldprc > 0.0:
                                     ltp = upldprc
+                                    price_source = "open position (upldprc)"
                                 else:
                                     dayavgprc = float(pos.get("dayavgprc") or 0.0)
                                     if dayavgprc > 0.0:
                                         ltp = dayavgprc
+                                        price_source = "open position (dayavgprc)"
                                     else:
                                         ltp = float(pos.get("netavgprc") or 0.0)
+                                        price_source = "open position (netavgprc)"
                                 break
                 except Exception as e:
                     logger.warning("Failed to get average price for MARKET order fallback: %s", e)
 
             if ltp > 0:
+                logger.info("MARKET to LIMIT conversion: LTP %.2f retrieved from %s for %s", ltp, price_source, symbol)
                 action = str(data.get("action", "BUY")).upper()
                 buffer_pct = 0.05
                 if action == "BUY":
@@ -181,6 +187,7 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
     payload["actid"] = actid
 
     response, result = _post_raw("PlaceOrder", payload, jkey)
+    logger.info("Shoonya PlaceOrder response for payload %s: HTTP %s, Result: %s", payload, response.status_code, result)
 
     # Inject status for service layer validation
     response.status = response.status_code
@@ -246,6 +253,8 @@ def place_smartorder_api(data: dict, auth_token: str) -> tuple:
             else:
                 action, quantity = "SELL", current_position - position_size
 
+        logger.info("place_smartorder_api computed action: %s, quantity: %s for %s", action, quantity, symbol)
+
         order_data = data.copy()
         order_data["action"] = action
         order_data["quantity"] = str(quantity)
@@ -269,6 +278,7 @@ def modify_order(data: dict, auth_token: str, config: dict | None = None) -> tup
     payload["uid"] = uid
 
     response, result = _post_raw("ModifyOrder", payload, jkey)
+    logger.info("Shoonya ModifyOrder response for payload %s: HTTP %s, Result: %s", payload, response.status_code, result)
 
     if result.get("stat") == "Ok":
         orderid = result.get("result", data.get("orderid", ""))
@@ -288,6 +298,7 @@ def cancel_order(orderid: str, auth_token: str, config: dict | None = None) -> t
 
     payload = {"uid": uid, "norenordno": orderid}
     response, result = _post_raw("CancelOrder", payload, jkey)
+    logger.info("Shoonya CancelOrder response for order %s: HTTP %s, Result: %s", orderid, response.status_code, result)
 
     if result.get("stat") == "Ok":
         ret_orderid = result.get("result", orderid)
@@ -359,9 +370,11 @@ def close_all_positions(current_api_key: str, auth_token: str) -> tuple[dict, in
             
             if response_data and response_data.get("status") == "success":
                 success_count += 1
+                logger.info("Successfully squared off symbol: %s. Order ID: %s", symbol, order_id)
             else:
                 failure_count += 1
                 last_error = response_data.get("message", "Unknown error") if response_data else "Unknown error"
+                logger.error("Failed to square off symbol: %s. Error: %s", symbol, last_error)
 
         _invalidate_position_cache(auth_token)
 

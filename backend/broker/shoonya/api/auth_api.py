@@ -8,9 +8,9 @@ Flow:
   4. This module exchanges the code for a session token via GenAcsTok.
 
 Credentials sourced from broker config:
-  - api_key    : Vendor code, e.g. "FA99299_U"  (client_id in OAuth URL)
+  - api_key    : Vendor code, e.g. "user_id_U"  (client_id in OAuth URL)
   - api_secret : App secret key                  (used in checksum)
-  - client_id  : Trading account user ID, e.g. "FA99299"  (uid)
+  - client_id  : Trading account user ID, e.g. "user_id"  (uid)
 
 GenAcsTok checksum = SHA-256(vendor_code + api_secret + oauth_code)
 """
@@ -39,8 +39,8 @@ def authenticate_broker(code_or_token: str, config: dict) -> tuple[str | None, s
         ``(susertoken, error_message)``
     """
     try:
-        uid = config.get("client_id", "").strip()          # trading account ID (FA99299)
-        vendor_code = config.get("api_key", "").strip()    # vendor code (FA99299_U)
+        uid = config.get("client_id", "").strip()          # trading account ID (user_id)
+        vendor_code = config.get("api_key", "").strip()    # vendor code (user_id_U)
         api_secret = config.get("api_secret", "").strip()  # app secret
         oauth_code = code_or_token.strip() if code_or_token else ""
 

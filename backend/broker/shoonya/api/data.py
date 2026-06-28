@@ -80,6 +80,9 @@ def _api_exchange(exchange: str) -> str:
         return "BSE"
     if exchange == "MCX_INDEX":
         return "MCX"
+        
+    if exchange not in ("NSE", "BSE", "NFO", "BFO", "MCX", "CDS"):
+        logger.error("Unsupported or unknown exchange: %s. Please add required support if it is a new exchange.", exchange)
     return exchange
 
 
@@ -147,6 +150,7 @@ def get_multi_quotes(
     Shoonya doesn't have a batch quote endpoint so we call GetQuotes serially.
     """
     if not symbols_list:
+        logger.warning("get_multi_quotes called with empty symbols_list. No quotes to fetch.")
         return []
 
     results: list[dict] = []
@@ -154,6 +158,7 @@ def get_multi_quotes(
         sym = item.get("symbol")
         exch = item.get("exchange")
         if not sym or not exch:
+            logger.warning("get_multi_quotes skipping invalid item (missing symbol or exchange): %s", item)
             continue
 
         try:
@@ -255,6 +260,7 @@ def _parse_shoonya_ts(time_str: str) -> int:
       - Daily (get_daily_price_series): ``ssboe`` field (seconds since epoch)
     """
     if not time_str:
+        logger.warning("Empty or null time_str provided to _parse_shoonya_ts")
         return 0
 
     for fmt in ("%d-%m-%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%b-%Y"):
@@ -266,7 +272,8 @@ def _parse_shoonya_ts(time_str: str) -> int:
     # Maybe it's already epoch seconds (from ssboe).
     try:
         return int(float(time_str))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as e:
+        logger.error("Failed to parse Shoonya time string '%s': %s", time_str, e)
         return 0
 
 
@@ -333,6 +340,7 @@ def _fetch_intraday(
         return []
 
     if not isinstance(result, list):
+        logger.error("Shoonya TPSeries returned non-list result: %s", result)
         return []
 
     candles: list[dict] = []
@@ -390,6 +398,7 @@ def _fetch_daily(
         return []
 
     if not isinstance(result, list):
+        logger.error("Shoonya daily chart API returned non-list result: %s", result)
         return []
 
     candles: list[dict] = []
