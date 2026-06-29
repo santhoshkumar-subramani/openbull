@@ -15,6 +15,7 @@ import BrokerSelect from "@/pages/BrokerSelect";
 import BrokerAngelLogin from "@/pages/BrokerAngelLogin";
 
 import ApiKey from "@/pages/ApiKey";
+import TelegramConfig from "@/pages/TelegramConfig";
 import OrderBook from "@/pages/OrderBook";
 import TradeBook from "@/pages/TradeBook";
 import Positions from "@/pages/Positions";
