@@ -133,6 +133,7 @@ export default function TelegramConfig() {
               <Label htmlFor="bot-token">Bot Token</Label>
               <Input
                 id="bot-token"
+                type="password"
                 placeholder="e.g. 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
                 value={botToken}
                 onChange={(e) => setBotToken(e.target.value)}
