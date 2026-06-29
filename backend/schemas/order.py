@@ -32,6 +32,8 @@ class ModifyOrderRequest(BaseModel):
     pricetype: str = Field(..., description="MARKET, LIMIT, SL, or SL-M")
     trigger_price: str = Field(default="0", description="New trigger price")
     disclosed_quantity: str = Field(default="0", description="New disclosed quantity")
+    symbol: str | None = Field(default=None, description="Trading symbol")
+    exchange: str | None = Field(default=None, description="Exchange")
 
 
 class CancelOrderRequest(BaseModel):

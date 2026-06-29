@@ -41,6 +41,7 @@ def transform_data(data: dict, token: str) -> dict:
 
 def transform_modify_order_data(data: dict, token: str) -> dict:
     """Transform OpenBull modify order to Angel modifyOrder format."""
+    symbol = _br_symbol(data["symbol"], data["exchange"])
     return {
         "variety": map_variety(data["pricetype"]),
         "orderid": data["orderid"],
@@ -49,7 +50,7 @@ def transform_modify_order_data(data: dict, token: str) -> dict:
         "duration": "DAY",
         "price": data["price"],
         "quantity": data["quantity"],
-        "tradingsymbol": data["symbol"],
+        "tradingsymbol": symbol,
         "symboltoken": token,
         "exchange": data["exchange"],
         "disclosedquantity": data.get("disclosed_quantity", "0"),

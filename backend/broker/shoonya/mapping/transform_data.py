@@ -36,16 +36,23 @@ def transform_data(data: dict, token: str) -> dict:
 
 def transform_modify_order_data(data: dict, token: str) -> dict:
     """Transform OpenBull modify order to Shoonya ModifyOrder format."""
-    return {
+    symbol = _br_symbol(data["symbol"], data["exchange"])
+    payload = {
         "exch": data["exchange"],
         "norenordno": data["orderid"],
-        "tsym": data["symbol"],
+        "tsym": symbol,
         "qty": str(data["quantity"]),
         "prc": str(data["price"]),
-        "trgprc": str(data.get("trigger_price", "0")),
         "prctyp": map_order_type(data["pricetype"]),
         "ret": "DAY",
     }
+    
+    # Only include trigger price if it's actually provided and > 0 (for SL orders)
+    trgprc = float(data.get("trigger_price", 0))
+    if trgprc > 0:
+        payload["trgprc"] = str(data["trigger_price"])
+        
+    return payload
 
 
 def map_order_type(pricetype: str) -> str:

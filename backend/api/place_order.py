@@ -127,9 +127,9 @@ async def api_modify_order(request: Request):
     user_id, auth_token, broker_name, config = api_user
 
     body = await _get_request_body(request)
-    # Accept (but ignore for the broker call) the OpenAlgo-style metadata fields
-    # symbol/action/exchange/product/strategy so that requests built for OpenAlgo
-    # work as-is. The broker modify endpoint only needs the fields below.
+    # Forward the OpenAlgo-style metadata fields (symbol/exchange)
+    # along with the core modify fields, as many brokers (Angel, Shoonya, etc.)
+    # require them to form the modify order payload.
     modify_data = {
         "orderid": body.get("orderid"),
         "quantity": body.get("quantity"),
@@ -137,6 +137,8 @@ async def api_modify_order(request: Request):
         "pricetype": body.get("pricetype"),
         "trigger_price": body.get("trigger_price", "0"),
         "disclosed_quantity": body.get("disclosed_quantity", "0"),
+        "symbol": body.get("symbol"),
+        "exchange": body.get("exchange"),
     }
 
     success, response_data, status_code = await run_in_threadpool(

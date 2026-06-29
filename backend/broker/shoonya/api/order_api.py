@@ -277,6 +277,7 @@ def modify_order(data: dict, auth_token: str, config: dict | None = None) -> tup
 
     payload = transform_modify_order_data(data, "")
     payload["uid"] = uid
+    payload["actid"] = actid
 
     response, result = _post_raw("ModifyOrder", payload, jkey)
     safe_payload = {k: v for k, v in payload.items() if k not in ("uid", "actid")}
@@ -296,9 +297,9 @@ def modify_order(data: dict, auth_token: str, config: dict | None = None) -> tup
 
 def cancel_order(orderid: str, auth_token: str, config: dict | None = None) -> tuple[dict, int]:
     """Cancel an order."""
-    uid, jkey, _ = _split_token(auth_token)
+    uid, jkey, actid = _split_token(auth_token)
 
-    payload = {"uid": uid, "norenordno": orderid}
+    payload = {"uid": uid, "actid": actid, "norenordno": orderid}
     response, result = _post_raw("CancelOrder", payload, jkey)
     logger.info("Shoonya CancelOrder response for order %s: HTTP %s, Result: %s", orderid, response.status_code, result)
 
