@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
-from sqlalchemy.orm import Session
-from backend.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from backend.dependencies import get_db
 from backend.models.telegram import TelegramConfig
 from backend.services.telegram_alert_service import TelegramAlertService
 
 webhook_router = APIRouter(prefix="/telegram", tags=["telegram-webhook"])
 
-async def process_telegram_update(update_data: dict, db: Session):
+async def process_telegram_update(update_data: dict, db: AsyncSession):
     if "message" not in update_data or "text" not in update_data["message"]:
         return
 
@@ -14,7 +15,13 @@ async def process_telegram_update(update_data: dict, db: Session):
     text = update_data["message"]["text"]
 
     # Verify this chat_id exists in our DB and is active
-    config = db.query(TelegramConfig).filter(TelegramConfig.chat_id == chat_id, TelegramConfig.is_active == True).first()
+    result = await db.execute(
+        select(TelegramConfig).where(
+            TelegramConfig.chat_id == chat_id, 
+            TelegramConfig.is_active == True
+        )
+    )
+    config = result.scalar_one_or_none()
     if not config:
         return
 
@@ -28,7 +35,7 @@ async def process_telegram_update(update_data: dict, db: Session):
         await TelegramAlertService._send_message_async(config.bot_token, chat_id, menu_message)
 
 @webhook_router.post("/webhook/{secret_token}")
-async def telegram_webhook(secret_token: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def telegram_webhook(secret_token: str, request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     # You should validate secret_token against an environment variable
     update_data = await request.json()
     background_tasks.add_task(process_telegram_update, update_data, db)

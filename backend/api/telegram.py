@@ -1,28 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from backend.database import get_db
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from backend.dependencies import get_db, get_current_user
 from backend.models.telegram import TelegramConfig
 from backend.schemas.telegram import TelegramConfigCreate, TelegramConfigUpdate, TelegramConfigResponse
-from backend.dependencies import get_current_user
 from backend.services.telegram_alert_service import TelegramAlertService
 from backend.models.user import User
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 @router.get("/config", response_model=TelegramConfigResponse)
-def get_telegram_config(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    config = db.query(TelegramConfig).filter(TelegramConfig.user_id == current_user.id).first()
+async def get_telegram_config(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    result = await db.execute(select(TelegramConfig).where(TelegramConfig.user_id == current_user.id))
+    config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="Telegram configuration not found")
     return config
 
 @router.post("/config", response_model=TelegramConfigResponse, status_code=status.HTTP_201_CREATED)
-def create_or_update_telegram_config(
+async def create_or_update_telegram_config(
     payload: TelegramConfigCreate, 
-    db: Session = Depends(get_db), 
+    db: AsyncSession = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    config = db.query(TelegramConfig).filter(TelegramConfig.user_id == current_user.id).first()
+    result = await db.execute(select(TelegramConfig).where(TelegramConfig.user_id == current_user.id))
+    config = result.scalar_one_or_none()
     
     if config:
         config.bot_token = payload.bot_token
@@ -37,30 +39,31 @@ def create_or_update_telegram_config(
         )
         db.add(config)
         
-    db.commit()
-    db.refresh(config)
+    await db.commit()
+    await db.refresh(config)
     return config
 
 @router.patch("/toggle", response_model=TelegramConfigResponse)
-def toggle_telegram_bot(
+async def toggle_telegram_bot(
     is_active: bool, 
-    db: Session = Depends(get_db), 
+    db: AsyncSession = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    config = db.query(TelegramConfig).filter(TelegramConfig.user_id == current_user.id).first()
+    result = await db.execute(select(TelegramConfig).where(TelegramConfig.user_id == current_user.id))
+    config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="Telegram configuration not found")
         
     config.is_active = is_active
-    db.commit()
-    db.refresh(config)
+    await db.commit()
+    await db.refresh(config)
     
     if is_active:
-        TelegramAlertService.dispatch_alert(db, current_user.id, "✅ OpenBull Bot Notifications Enabled")
+        await TelegramAlertService.dispatch_alert(db, current_user.id, "✅ OpenBull Bot Notifications Enabled")
         
     return config
 
 @router.post("/test")
-def test_telegram_alert(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    TelegramAlertService.dispatch_alert(db, current_user.id, "🧪 *Test Alert*\n\nYour Telegram integration with OpenBull is working perfectly!")
+async def test_telegram_alert(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    await TelegramAlertService.dispatch_alert(db, current_user.id, "🧪 *Test Alert*\n\nYour Telegram integration with OpenBull is working perfectly!")
     return {"message": "Test alert dispatched. Check your Telegram."}
