@@ -130,6 +130,7 @@ function App() {
                   }
                 />
                 <Route path="/broker/config" element={<BrokerConfig />} />
+                <Route path="/telegram/config" element={<TelegramConfig />} />
                 <Route path="/apikey" element={<ApiKey />} />
                 <Route
                   path="/search"

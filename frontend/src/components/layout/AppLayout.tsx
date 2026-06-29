@@ -349,6 +349,12 @@ function ProfileMenu({ onLogout }: { onLogout: () => void }) {
             <span className="text-sm">Broker Configuration</span>
           </DropdownMenuItem>
           <DropdownMenuItem
+            render={<NavLink to="/telegram/config" />}
+            className="min-h-[40px] px-2"
+          >
+            <span className="text-sm">Telegram Bot</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
             render={<NavLink to="/apikey" />}
             className="min-h-[40px] px-2"
           >
