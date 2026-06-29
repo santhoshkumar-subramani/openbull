@@ -309,6 +309,13 @@ from backend.routers.playground import router as playground_router
 
 app.include_router(playground_router)
 
+# Telegram Notifications and Webhook
+from backend.api.telegram import router as telegram_router
+from backend.api.telegram_webhook import webhook_router as telegram_webhook_router
+
+app.include_router(telegram_router)
+app.include_router(telegram_webhook_router)
+
 
 # Health check
 @app.get("/health")
