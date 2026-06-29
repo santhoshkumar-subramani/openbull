@@ -1,4 +1,4 @@
-import api from "./auth";
+import api from "@/config/api";
 
 export interface TelegramConfig {
   id?: number;
