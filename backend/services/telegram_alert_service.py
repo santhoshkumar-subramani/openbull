@@ -34,10 +34,24 @@ class TelegramAlertService:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
                 logger.info(f"Telegram alert sent to chat {chat_id}")
+                return True
         except httpx.HTTPError as e:
             logger.error(f"Failed to send Telegram alert: {e}")
+            raise Exception(f"Failed to communicate with Telegram: {e}")
         except Exception as e:
             logger.error(f"Unexpected error sending Telegram alert: {e}")
+            raise Exception(f"Unexpected error: {e}")
+
+    @classmethod
+    async def test_alert(cls, db: AsyncSession, user_id: int, message: str):
+        """
+        Sends a test alert synchronously (awaits) and raises an exception if it fails.
+        """
+        config = await cls._get_config(db, user_id)
+        if not config or not config.bot_token or not config.chat_id:
+            raise Exception("Telegram bot token or chat ID is missing. Please configure first.")
+        
+        await cls._send_message_async(config.bot_token, config.chat_id, message)
 
     @classmethod
     async def dispatch_alert(cls, db: AsyncSession, user_id: int, message: str):

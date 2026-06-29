@@ -65,5 +65,8 @@ async def toggle_telegram_bot(
 
 @router.post("/test")
 async def test_telegram_alert(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await TelegramAlertService.dispatch_alert(db, current_user.id, "🧪 *Test Alert*\n\nYour Telegram integration with OpenBull is working perfectly!")
-    return {"message": "Test alert dispatched. Check your Telegram."}
+    try:
+        await TelegramAlertService.test_alert(db, current_user.id, "🧪 *Test Alert*\n\nYour Telegram integration with OpenBull is working perfectly!")
+        return {"message": "Test alert dispatched. Check your Telegram."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
