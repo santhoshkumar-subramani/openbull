@@ -4,6 +4,7 @@ from sqlalchemy import select
 from backend.dependencies import get_db
 from backend.models.telegram import TelegramConfig
 from backend.services.telegram_alert_service import TelegramAlertService
+from backend.security import decrypt_value
 
 webhook_router = APIRouter(prefix="/api/telegram", tags=["telegram-webhook"])
 
@@ -28,11 +29,11 @@ async def process_telegram_update(update_data: dict, db: AsyncSession):
     if text.startswith("/pnl"):
         # Fetch actual PnL logic here
         pnl_message = "📊 *Daily PnL Report*\n\n*M2M:* +$1,250.00\n*Available Funds:* $50,000.00"
-        await TelegramAlertService._send_message_async(config.bot_token, chat_id, pnl_message)
+        await TelegramAlertService._send_message_async(decrypt_value(config.bot_token_encrypted), chat_id, pnl_message)
         
     elif text.startswith("/menu"):
         menu_message = "🤖 *OpenBull Bot Menu*\n\n/pnl - View Daily PnL\n/positions - View Open Positions\n/stop - Disable Alerts"
-        await TelegramAlertService._send_message_async(config.bot_token, chat_id, menu_message)
+        await TelegramAlertService._send_message_async(decrypt_value(config.bot_token_encrypted), chat_id, menu_message)
 
 @webhook_router.post("/webhook/{secret_token}")
 async def telegram_webhook(secret_token: str, request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):

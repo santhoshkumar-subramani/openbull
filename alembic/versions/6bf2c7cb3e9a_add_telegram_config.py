@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_table('telegram_config',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('bot_token', sa.String(length=255), nullable=False),
+    sa.Column('bot_token_encrypted', sa.Text(), nullable=False),
     sa.Column('chat_id', sa.String(length=255), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),

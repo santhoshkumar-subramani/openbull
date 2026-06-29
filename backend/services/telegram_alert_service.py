@@ -18,7 +18,7 @@ class TelegramAlertService:
 
     @staticmethod
     def _is_bot_active(config: Optional[TelegramConfig]) -> bool:
-        return bool(config and config.is_active and config.bot_token and config.chat_id)
+        return bool(config and config.is_active and config.bot_token_encrypted and config.chat_id)
 
     @classmethod
     async def _send_message_async(cls, bot_token: str, chat_id: str, text: str):
@@ -48,10 +48,11 @@ class TelegramAlertService:
         Sends a test alert synchronously (awaits) and raises an exception if it fails.
         """
         config = await cls._get_config(db, user_id)
-        if not config or not config.bot_token or not config.chat_id:
+        if not config or not config.bot_token_encrypted or not config.chat_id:
             raise Exception("Telegram bot token or chat ID is missing. Please configure first.")
         
-        await cls._send_message_async(config.bot_token, config.chat_id, message)
+        bot_token = decrypt_value(config.bot_token_encrypted)
+        await cls._send_message_async(bot_token, config.chat_id, message)
 
     @classmethod
     async def dispatch_alert(cls, db: AsyncSession, user_id: int, message: str):
@@ -63,8 +64,9 @@ class TelegramAlertService:
             logger.debug(f"Telegram alerts disabled or not configured for user {user_id}")
             return
             
+        bot_token = decrypt_value(config.bot_token_encrypted)
         # Create an asyncio background task
-        asyncio.create_task(cls._send_message_async(config.bot_token, config.chat_id, message))
+        asyncio.create_task(cls._send_message_async(bot_token, config.chat_id, message))
 
     @classmethod
     async def send_order_alert(cls, db: AsyncSession, user_id: int, order_details: dict):
