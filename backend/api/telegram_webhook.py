@@ -5,7 +5,7 @@ from backend.dependencies import get_db
 from backend.models.telegram import TelegramConfig
 from backend.services.telegram_alert_service import TelegramAlertService
 
-webhook_router = APIRouter(prefix="/telegram", tags=["telegram-webhook"])
+webhook_router = APIRouter(prefix="/api/telegram", tags=["telegram-webhook"])
 
 async def process_telegram_update(update_data: dict, db: AsyncSession):
     if "message" not in update_data or "text" not in update_data["message"]:

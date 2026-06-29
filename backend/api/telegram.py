@@ -7,7 +7,7 @@ from backend.schemas.telegram import TelegramConfigCreate, TelegramConfigUpdate,
 from backend.services.telegram_alert_service import TelegramAlertService
 from backend.models.user import User
 
-router = APIRouter(prefix="/telegram", tags=["telegram"])
+router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 @router.get("/config", response_model=TelegramConfigResponse)
 async def get_telegram_config(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
