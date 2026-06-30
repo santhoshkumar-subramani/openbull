@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { getOrderbook } from "@/api/dashboard";
@@ -374,9 +375,16 @@ export default function OrderBook() {
                         {formatOrderTime(order.timestamp)}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getStatusVariant(order.order_status)}>
-                          {order.order_status}
-                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant={getStatusVariant(order.order_status)}>
+                            {order.order_status}
+                          </Badge>
+                          {order.order_status.toUpperCase() === "REJECTED" && order.reject_reason && (
+                            <span title={order.reject_reason} className="cursor-help flex items-center shrink-0">
+                              <Info className="h-4 w-4 text-destructive" />
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {order.orderid ? (

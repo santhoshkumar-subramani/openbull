@@ -17,6 +17,7 @@ export interface OrderbookItem {
   trigger_price: number;
   orderid: string;
   order_status: string;
+  reject_reason?: string;
   timestamp: string;
 }
 

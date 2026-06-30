@@ -153,6 +153,7 @@ def transform_order_data(orders) -> list[dict]:
             "orderid": order.get("norenordno", ""),
             "order_status": order.get("status") or "",
             "timestamp": order.get("norentm", ""),
+            "reject_reason": order.get("rejreason", ""),
         })
 
     return transformed
