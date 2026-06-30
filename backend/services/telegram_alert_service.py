@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.models.telegram import TelegramConfig
+from backend.security import decrypt_value
 
 logger = logging.getLogger(__name__)
 
