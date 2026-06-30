@@ -4,7 +4,7 @@ Call :func:`register_all` once during app startup. New subscribers can be
 added without touching publishers — that's the point of the event bus.
 """
 
-from backend.subscribers import strategy_audit_subscriber, strategy_ws_subscriber
+from backend.subscribers import strategy_audit_subscriber, strategy_ws_subscriber, telegram_subscriber
 from backend.utils.event_bus import bus
 from backend.utils.logging import get_logger
 
@@ -60,7 +60,12 @@ def register_all() -> None:
             strategy_ws_subscriber.push_event,
             f"ws:{topic}",
         )
+        
+    # Register telegram subscribers for position events
+    bus.subscribe("position.opened", telegram_subscriber.handle_position_opened, "telegram_pos_opened")
+    bus.subscribe("position.closed", telegram_subscriber.handle_position_closed, "telegram_pos_closed")
+
     logger.info(
-        "EventBus: %d audit + %d ws-broadcast subscriptions registered",
+        "EventBus: %d audit + %d ws-broadcast subscriptions registered, plus telegram notifications",
         len(_STRATEGY_AUDIT_TOPICS), len(_STRATEGY_AUDIT_TOPICS),
     )

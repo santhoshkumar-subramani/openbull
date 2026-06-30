@@ -326,9 +326,26 @@ class ShoonyaAdapter(BaseBrokerAdapter):
                 self._process_depth(data)
             return
 
-        # Order update — log only.
+        # Order update — log and trigger position sync.
         if msg_type in ("ok", "om"):
             logger.debug("Shoonya order update: %s", data)
+            
+            # If the order is COMPLETE (filled), or it's just an update, 
+            # trigger a background fetch of positions so the diffing engine fires alerts!
+            if hasattr(self, "_openbull_user_id") and self._openbull_user_id:
+                try:
+                    import threading
+                    def _bg_fetch_positions():
+                        try:
+                            from backend.services.positions_service import get_positions_with_auth
+                            # This will fetch the positions synchronously and fire the async diff engine
+                            get_positions_with_auth(self.auth_token, "shoonya", user_id=self._openbull_user_id)
+                        except Exception as fetch_err:
+                            logger.error("Background position fetch failed on order update: %s", fetch_err)
+                            
+                    threading.Thread(target=_bg_fetch_positions, daemon=True).start()
+                except Exception as e:
+                    logger.error("Failed to start background position thread: %s", e)
             return
 
     def _on_error(self, ws, error) -> None:

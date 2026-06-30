@@ -58,7 +58,7 @@ MAX_MESSAGE_SIZE = 65536  # 64KB
 MAX_SYMBOLS_PER_SUBSCRIBE = 1000
 
 
-def _create_adapter(broker_name: str, auth_token: str, config: dict) -> BaseBrokerAdapter:
+def _create_adapter(broker_name: str, auth_token: str, config: dict, user_id: int | None = None) -> BaseBrokerAdapter:
     if broker_name == "upstox":
         from backend.broker.upstox.streaming.upstox_adapter import UpstoxAdapter
         return UpstoxAdapter(auth_token, config)
@@ -76,7 +76,9 @@ def _create_adapter(broker_name: str, auth_token: str, config: dict) -> BaseBrok
         return AngelAdapter(auth_token, config)
     elif broker_name == "shoonya":
         from backend.broker.shoonya.streaming.shoonya_adapter import ShoonyaAdapter
-        return ShoonyaAdapter(auth_token, config)
+        adapter = ShoonyaAdapter(auth_token, config)
+        adapter._openbull_user_id = user_id
+        return adapter
     raise ValueError(f"No streaming adapter for broker: {broker_name}")
 
 
@@ -266,7 +268,7 @@ async def _handle_client(ws: websockets.WebSocketServerProtocol) -> None:
 
                     if _adapter is None:
                         try:
-                            _adapter = _create_adapter(broker_name, auth_token, config)
+                            _adapter = _create_adapter(broker_name, auth_token, config, user_id=user_id)
                             zmq_port = _adapter.setup_zmq()
 
                             # Connect adapter in a background thread (it blocks)

@@ -201,6 +201,64 @@ def apply_fill(
         # LTP/PnL refresh will happen in mark_to_market; keep pos.pnl
         # consistent for now so the orderbook UI shows something sensible.
         pos.pnl = round(pos.realized_pnl + pos.unrealized_pnl, 4)
+        
+        # Determine if we should emit open/close events
+        opened_qty = 0
+        opened_price = 0.0
+        closed_qty = 0
+        closed_price = 0.0
+        closed_realized = 0.0
+        margin_used = 0.0
+        
+        if (old_net == 0 and new_net != 0):
+            # Fresh open
+            opened_qty = abs(new_net)
+            opened_price = price
+            margin_used = pos.margin_blocked
+        elif (old_net != 0 and new_net == 0):
+            # Full close
+            closed_qty = abs(old_net)
+            closed_price = price
+            closed_realized = realized_delta
+        elif remaining > 0:
+            # Reversed (close old, open new)
+            closed_qty = abs(old_net)
+            closed_price = price
+            closed_realized = realized_delta
+            opened_qty = remaining
+            opened_price = price
+            margin_used = float(order_margin or 0.0)
+            
+    # Publish events outside DB lock
+    from backend.utils.event_bus import bus
+    from backend.events.position_events import PositionOpenedEvent, PositionClosedEvent
+    from datetime import datetime
+    
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    if closed_qty > 0:
+        bus.publish(PositionClosedEvent(
+            user_id=user_id,
+            position_data={
+                "symbol": symbol,
+                "quantity": closed_qty,
+                "average_price": closed_price,
+                "realized_pnl": closed_realized
+            }
+        ))
+        
+    if opened_qty > 0:
+        bus.publish(PositionOpenedEvent(
+            user_id=user_id,
+            position_data={
+                "action": action,
+                "symbol": symbol,
+                "quantity": opened_qty,
+                "average_price": opened_price,
+                "execution_time": now_str,
+                "margin_blocked": margin_used
+            }
+        ))
 
     return round(realized_delta, 4), round(margin_to_release, 2)
 

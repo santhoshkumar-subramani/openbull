@@ -93,6 +93,30 @@ def place_order_with_auth(
         return False, {"status": "error", "message": "Failed to place order due to internal error"}, 500
 
     if res and res.status == 200:
+        # Dispatch a fallback Telegram alert for live order placement
+        try:
+            from backend.database import async_session
+            from backend.services.telegram_alert_service import TelegramAlertService
+            import asyncio
+            
+            async def _send_live_order_alert():
+                async with async_session() as db_session:
+                    alert_msg = (
+                        f"🚀 *Live Order Submitted*\n\n"
+                        f"*Symbol:* {order_data.get('symbol', 'UNKNOWN')}\n"
+                        f"• *Action:* {order_data.get('action', 'UNKNOWN')}\n"
+                        f"• *Qty:* {order_data.get('quantity', 0)}\n"
+                        f"• *Price Type:* {order_data.get('pricetype', 'UNKNOWN')}\n"
+                        f"• *Order ID:* {order_id}"
+                    )
+                    await TelegramAlertService.dispatch_alert(db_session, user_id, alert_msg)
+            
+            # Fire and forget if user_id is known (fastapi loop will execute it)
+            if user_id:
+                asyncio.create_task(_send_live_order_alert())
+        except Exception as alert_err:
+            logger.error("Failed to trigger live order telegram alert: %s", alert_err)
+
         return True, {"status": "success", "orderid": order_id}, 200
     else:
         message = (
@@ -283,6 +307,22 @@ def close_all_positions_service(
     try:
         result, status_code = broker_module.close_all_positions(api_key, auth_token)
         success = result.get("status") == "success"
+        
+        if success and user_id:
+            try:
+                from backend.database import async_session
+                from backend.services.telegram_alert_service import TelegramAlertService
+                import asyncio
+                
+                async def _send_live_close_all_alert():
+                    async with async_session() as db_session:
+                        alert_msg = "⚠️ *Live Command Executed: Close All Positions*\n\nAll open positions have been sent an exit order via the broker API."
+                        await TelegramAlertService.dispatch_alert(db_session, user_id, alert_msg)
+                
+                asyncio.create_task(_send_live_close_all_alert())
+            except Exception as alert_err:
+                logger.error("Failed to trigger live close_all_positions telegram alert: %s", alert_err)
+
         return success, result, status_code
     except Exception as e:
         logger.error("Error closing all positions: %s", e)
