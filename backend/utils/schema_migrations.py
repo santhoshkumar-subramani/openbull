@@ -110,6 +110,14 @@ def run_startup_migrations() -> None:
             engine, "sm_strategy", "webhook_locked",
             "BOOLEAN NOT NULL DEFAULT FALSE",
         )
+        
+        # Condition-driven strategy module fields:
+        _add_column_if_missing(
+            engine, "sm_strategy", "index_trigger", "JSONB"
+        )
+        _add_column_if_missing(
+            engine, "sm_strategy", "vix_condition", "JSONB"
+        )
     except Exception:
         logger.exception("Startup schema migration failed")
     finally:

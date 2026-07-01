@@ -65,6 +65,7 @@ def _import_all_models() -> None:
     import backend.models.strategies  # noqa: F401  (saved option strategies)
     import backend.models.position_groups  # noqa: F401 (strategy manager)
     import backend.models.telegram  # noqa: F401 (telegram config)
+    import backend.models.strategy_module  # noqa: F401 (sm_strategy, etc)
 
 
 def step_create_all(engine) -> None:
