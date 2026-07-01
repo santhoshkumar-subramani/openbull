@@ -287,6 +287,9 @@ def transform_positions_data(positions_data: list[dict]) -> list[dict]:
             "average_price": avg_price,
             "ltp": round(ltp, 2),
             "pnl": round(pnl, 2),
+            "realized_pnl": round(rpnl, 2),
+            "buyavg": float(pos.get("daybuyavgprc") or 0.0),
+            "sellavg": float(pos.get("daysellavgprc") or 0.0),
         })
     return transformed
 

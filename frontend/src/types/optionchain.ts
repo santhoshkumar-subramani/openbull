@@ -93,8 +93,9 @@ export const FALLBACK_UNDERLYINGS: Record<FnoExchange, UnderlyingOption[]> = {
     { symbol: "MIDCPNIFTY", name: "NIFTY MID SELECT" },
   ],
   BFO: [
-    { symbol: "SENSEX", name: "BSE SENSEX" },
-    { symbol: "BANKEX", name: "BSE BANKEX" },
+    { symbol: "BSXOPT", name: "BSE SENSEX" },
+    { symbol: "BKXOPT", name: "BSE BANKEX" },
+    { symbol: "SX50OPT", name: "BSE SENSEX 50" },
   ],
   MCX: [
     { symbol: "CRUDEOIL", name: "CRUDEOIL" },
@@ -125,7 +126,7 @@ export const NSE_INDEX_SYMBOLS = new Set([
   "NIFTYBANK",
   "INDIAVIX",
 ]);
-export const BSE_INDEX_SYMBOLS = new Set(["SENSEX", "BANKEX", "SENSEX50"]);
+export const BSE_INDEX_SYMBOLS = new Set(["SENSEX", "BANKEX", "SENSEX50", "BSXOPT", "BKXOPT", "SX50OPT"]);
 
 export function getUnderlyingExchange(symbol: string, optionExchange: string): string {
   if (NSE_INDEX_SYMBOLS.has(symbol)) return "NSE_INDEX";

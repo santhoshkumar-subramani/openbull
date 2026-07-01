@@ -13,7 +13,11 @@ def handle_position_opened(event: PositionOpenedEvent):
         loop = asyncio.get_running_loop()
         loop.create_task(_send_opened(event))
     except RuntimeError:
-        asyncio.run(_send_opened(event))
+        import backend.utils.global_loop as gl
+        if gl.MAIN_LOOP:
+            asyncio.run_coroutine_threadsafe(_send_opened(event), gl.MAIN_LOOP)
+        else:
+            logger.error("No running event loop and MAIN_LOOP is not set.")
 
 async def _send_opened(event: PositionOpenedEvent):
     async with async_session() as db:
@@ -26,7 +30,11 @@ def handle_position_closed(event: PositionClosedEvent):
         loop = asyncio.get_running_loop()
         loop.create_task(_send_closed(event))
     except RuntimeError:
-        asyncio.run(_send_closed(event))
+        import backend.utils.global_loop as gl
+        if gl.MAIN_LOOP:
+            asyncio.run_coroutine_threadsafe(_send_closed(event), gl.MAIN_LOOP)
+        else:
+            logger.error("No running event loop and MAIN_LOOP is not set.")
 
 async def _send_closed(event: PositionClosedEvent):
     async with async_session() as db:

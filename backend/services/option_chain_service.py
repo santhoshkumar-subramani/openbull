@@ -98,7 +98,14 @@ def get_option_chain(
         # no spot, so we auto-pick the near-month FUT unless the caller passed
         # an explicit FUT contract via ``underlying="BASE{DDMMMYY}FUT"``.
         if quote_exchange in ("NSE_INDEX", "BSE_INDEX", "NSE", "BSE"):
-            pricing_symbol, pricing_exchange = base_symbol, quote_exchange
+            pricing_symbol = base_symbol
+            if pricing_symbol == "BSXOPT":
+                pricing_symbol = "SENSEX"
+            elif pricing_symbol == "BKXOPT":
+                pricing_symbol = "BANKEX"
+            elif pricing_symbol == "SX50OPT":
+                pricing_symbol = "SENSEX50"
+            pricing_exchange = quote_exchange
         elif embedded_expiry:
             pricing_symbol, pricing_exchange = underlying.upper(), quote_exchange
         else:

@@ -40,6 +40,12 @@ def download_master_contracts(broker_name: str, auth_token: str | None = None) -
 _OPTION_SYMBOL_PREFIX_RE = re.compile(r"^([A-Z0-9]+?)(\d{2}[A-Z]{3}\d{2})\d")
 
 
+_BFO_NAME_MAP = {
+    "BSXOPT": "BSE SENSEX",
+    "BKXOPT": "BSE BANKEX",
+    "SX50OPT": "BSE SENSEX 50",
+}
+
 def get_option_underlyings(exchange: str) -> list[dict]:
     """Return distinct option underlyings for an exchange as {symbol, name} pairs.
 
@@ -78,7 +84,10 @@ def get_option_underlyings(exchange: str) -> list[dict]:
         if prefix in seen:
             continue
         seen.add(prefix)
-        out.append({"symbol": prefix, "name": (name or prefix).strip()})
+        display_name = (name or prefix).strip()
+        if exchange.upper() == "BFO" and prefix in _BFO_NAME_MAP:
+            display_name = _BFO_NAME_MAP[prefix]
+        out.append({"symbol": prefix, "name": display_name})
     out.sort(key=lambda r: r["symbol"])
     return out
 

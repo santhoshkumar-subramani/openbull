@@ -87,7 +87,23 @@ def get_token_from_cache(symbol: str, exchange: str) -> str | None:
     """Look up instrument token from in-memory cache."""
     if _symbol_exchange_to_token is None:
         return None
-    return _symbol_exchange_to_token.get((symbol, exchange))
+    token = _symbol_exchange_to_token.get((symbol, exchange))
+    if token is not None:
+        return token
+    
+    # Shoonya / missing master contract fallbacks for popular indices
+    if exchange in ("BSE", "BSE_INDEX"):
+        if symbol == "SENSEX": return "1"
+        if symbol == "BANKEX": return "12"
+        if symbol == "SENSEX50": return "118"
+    elif exchange in ("NSE", "NSE_INDEX"):
+        if symbol == "NIFTY": return "26000"
+        if symbol == "BANKNIFTY": return "26009"
+        if symbol == "FINNIFTY": return "26037"
+        if symbol == "MIDCPNIFTY": return "26074"
+        if symbol == "INDIAVIX": return "26017"
+        
+    return None
 
 
 def get_brsymbol_from_cache(symbol: str, exchange: str) -> str | None:

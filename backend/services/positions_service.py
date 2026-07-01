@@ -94,7 +94,12 @@ def get_positions_with_auth(
                 loop = asyncio.get_running_loop()
                 loop.create_task(_async_diff_positions(user_id, formatted_positions))
             except RuntimeError:
-                pass
+                import backend.utils.global_loop as gl
+                if gl.MAIN_LOOP is not None:
+                    import asyncio
+                    asyncio.run_coroutine_threadsafe(
+                        _async_diff_positions(user_id, formatted_positions), gl.MAIN_LOOP
+                    )
                 
         return True, {"status": "success", "data": formatted_positions}, 200
 
@@ -137,6 +142,7 @@ async def _async_diff_positions(user_id: int, current_positions: list):
                 
                 # Note: We can also trigger on partial adds, but let's stick to fresh opens
                 if old_qty == 0:
+                    logger.info(f"[Position Diff] Detected new open for {sym} (old_qty: {old_qty}, new_qty: {new_qty})")
                     action = "BUY" if new_qty > 0 else "SELL"
                     # Average entry price could be buyavg/sellavg depending on side
                     avg_price = new_p.get("average_price") or new_p.get("buyavg") if action == "BUY" else new_p.get("sellavg")
@@ -150,6 +156,8 @@ async def _async_diff_positions(user_id: int, current_positions: list):
                             "execution_time": format_ist(now_utc())
                         }
                     ))
+                else:
+                    logger.debug(f"[Position Diff] Unchanged/partial open for {sym} (old_qty: {old_qty}, new_qty: {new_qty})")
 
         # Check for Closed positions
         for sym, old_p in old_map.items():
@@ -160,6 +168,7 @@ async def _async_diff_positions(user_id: int, current_positions: list):
                 
                 # If quantity drops to exactly zero
                 if new_qty == 0:
+                    logger.info(f"[Position Diff] Detected full close for {sym} (old_qty: {old_qty}, new_qty: {new_qty})")
                     realized_pnl = 0.0
                     # Try to fetch realized PnL from the broker's API response directly
                     if new_p:

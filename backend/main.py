@@ -119,6 +119,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.info("Symbol cache not loaded (will load after master contract download): %s", e)
 
+    # Store the main asyncio loop for cross-thread async dispatches
+    import backend.utils.global_loop as global_loop
+    global_loop.MAIN_LOOP = asyncio.get_running_loop()
+
     # Start WebSocket proxy server in background
     from backend.websocket_proxy.server import start_ws_proxy, shutdown_ws_proxy
     ws_task = asyncio.create_task(
