@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import { useMarketData } from "@/hooks/useMarketData";
 import {
   Card,
   CardContent,
@@ -59,6 +60,37 @@ function getPnlColor(value: number): string {
   return "";
 }
 
+function formatSymbol(symbol: string) {
+  // Try matching symbols with an explicit DDMMMYY or YYMDD date format (e.g. 02JUL26 or 24O17)
+  let match = symbol.match(/^(.*?)(\d{2}[A-Za-z]{1,4}\d{2})(\d+)(PE|CE)$/i);
+  if (match) {
+    return (
+      <span>
+        {match[1]}{match[2]}
+        <strong className="font-extrabold">{match[3]}</strong>
+        {match[4]}
+      </span>
+    );
+  }
+
+  // Fallback for symbols where the date format might just be YYMMM (e.g. 26JUL) or no date
+  match = symbol.match(/^(.*?[A-Za-z])(\d+)(PE|CE)$/i);
+  if (match) {
+    // Only highlight if the digits aren't excessively long, minimizing risk of highlighting the year
+    if (match[2].length <= 5) {
+      return (
+        <span>
+          {match[1]}
+          <strong className="font-extrabold">{match[2]}</strong>
+          {match[3]}
+        </span>
+      );
+    }
+  }
+
+  return <span>{symbol}</span>;
+}
+
 function isCloseable(p: PositionItem): boolean {
   return (p.quantity ?? 0) !== 0;
 }
@@ -72,6 +104,63 @@ function formatError(err: any): string {
     return detail;
   }
   return err?.message || "An unknown error occurred";
+}
+
+const INDEX_SYMBOLS = [
+  { symbol: "INDIAVIX", exchange: "NSE_INDEX", label: "India Vix" },
+  { symbol: "NIFTY", exchange: "NSE_INDEX", label: "Nifty 50" },
+  { symbol: "BANKNIFTY", exchange: "NSE_INDEX", label: "Bank Nifty" },
+  { symbol: "SENSEX", exchange: "BSE_INDEX", label: "Sensex" },
+];
+
+function LiveIndices() {
+  const { data } = useMarketData({
+    symbols: INDEX_SYMBOLS,
+    mode: "Quote",
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-6 rounded-md border bg-card p-4 shadow-sm">
+      {INDEX_SYMBOLS.map((idx) => {
+        const key = `${idx.exchange}:${idx.symbol}`;
+        const tick = data.get(key)?.data;
+        
+        const ltp = tick?.ltp;
+        let change = tick?.change;
+        let pChange = tick?.change_percent;
+        
+        if (ltp != null && tick?.close != null && change == null) {
+          change = ltp - tick.close;
+        }
+        if (ltp != null && tick?.close != null && pChange == null && tick.close !== 0) {
+          pChange = ((ltp - tick.close) / tick.close) * 100;
+        }
+
+        const isPositive = change && change > 0;
+        const isNegative = change && change < 0;
+        
+        const colorClass = isPositive 
+          ? "text-green-600 dark:text-green-400" 
+          : isNegative 
+            ? "text-red-600 dark:text-red-400" 
+            : "text-foreground";
+            
+        return (
+          <div key={key} className="flex flex-col min-w-[140px]">
+            <span className="text-sm font-medium text-muted-foreground">{idx.label}</span>
+            <span className="text-lg font-bold text-foreground mt-0.5">
+              {ltp != null ? ltp.toFixed(2) : "-"}
+            </span>
+            {(change != null && pChange != null) ? (
+              <span className={`text-xs font-medium mt-0.5 ${colorClass}`}>
+                {change > 0 ? "+" : ""}{change.toFixed(2)} ({change > 0 ? "+" : ""}{pChange.toFixed(2)}%)
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function GroupedPositions() {
@@ -234,6 +323,9 @@ export default function GroupedPositions() {
         </div>
       )}
 
+      {/* Live Indices */}
+      <LiveIndices />
+
       {/* Master Table */}
       <Card>
         <CardHeader 
@@ -294,7 +386,7 @@ export default function GroupedPositions() {
 
                   return (
                     <TableRow key={key} className={i % 2 === 0 ? "bg-muted/30" : ""}>
-                      <TableCell className="font-medium">{pos.symbol}</TableCell>
+                      <TableCell className="font-medium">{formatSymbol(pos.symbol)}</TableCell>
                       <TableCell>{pos.exchange}</TableCell>
                       <TableCell>{pos.product}</TableCell>
                       <TableCell>
@@ -383,17 +475,22 @@ export default function GroupedPositions() {
                   <CardTitle className="flex items-center gap-2">
                     {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
                     {group.name}
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={(e) => { e.stopPropagation(); setGroupToDelete(group); }} 
+                      className="h-8 w-8 p-0 text-red-600 hover:bg-red-100 hover:text-red-700 dark:text-red-500 dark:hover:bg-red-950/50 ml-2"
+                      title="Delete Group"
+                    >
+                      <span className="sr-only">Delete Group</span>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </CardTitle>
                   <CardDescription>Empty Strategy Group</CardDescription>
                 </div>
-                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
-                    <p className="text-xl font-bold text-muted-foreground">0.00</p>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => setGroupToDelete(group)} className="text-destructive hover:bg-destructive/10">
-                    Delete Group
-                  </Button>
+                <div className="text-right" onClick={(e) => e.stopPropagation()}>
+                  <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
+                  <p className="text-xl font-bold text-muted-foreground">0.00</p>
                 </div>
               </CardHeader>
               {!foldedState[group.id.toString()] && (
@@ -419,20 +516,25 @@ export default function GroupedPositions() {
                 <CardTitle className="flex items-center gap-2">
                   {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
                   {group.name}
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={(e) => { e.stopPropagation(); setGroupToDelete(group); }} 
+                    className="h-8 w-8 p-0 text-red-600 hover:bg-red-100 hover:text-red-700 dark:text-red-500 dark:hover:bg-red-950/50 ml-2"
+                    title="Delete Group"
+                  >
+                    <span className="sr-only">Delete Group</span>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </CardTitle>
                 <CardDescription>{groupPositions.length} position{groupPositions.length !== 1 ? 's' : ''}</CardDescription>
               </div>
-              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
-                <div className="text-right">
-                  <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
-                  <p className={`text-xl font-bold ${getPnlColor(groupPnl)}`}>
-                    {groupPnl >= 0 ? "+" : ""}
-                    {groupPnl.toFixed(2)}
-                  </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => setGroupToDelete(group)} className="text-destructive hover:bg-destructive/10">
-                  Delete Group
-                </Button>
+              <div className="text-right" onClick={(e) => e.stopPropagation()}>
+                <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
+                <p className={`text-xl font-bold ${getPnlColor(groupPnl)}`}>
+                  {groupPnl >= 0 ? "+" : ""}
+                  {groupPnl.toFixed(2)}
+                </p>
               </div>
             </CardHeader>
             {!foldedState[group.id.toString()] && (
@@ -455,7 +557,7 @@ export default function GroupedPositions() {
                     const key = `${pos.symbol}-${pos.exchange}-${pos.product}`;
                     return (
                       <TableRow key={key} className={i % 2 === 0 ? "bg-muted/30" : ""}>
-                        <TableCell className="font-medium">{pos.symbol}</TableCell>
+                        <TableCell className="font-medium">{formatSymbol(pos.symbol)}</TableCell>
                         <TableCell>{pos.exchange}</TableCell>
                         <TableCell>{pos.product}</TableCell>
                         <TableCell className="text-right">{pos.quantity}</TableCell>
