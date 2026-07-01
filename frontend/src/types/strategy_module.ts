@@ -40,7 +40,7 @@ export type ExpiryRank =
   | "monthly"
   | "current"
   | "next";
-export type StrikeMode = "atm" | "strike";
+export type StrikeMode = "atm" | "strike" | "premium_range";
 export type Weekday = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
 
 /**
@@ -49,7 +49,7 @@ export type Weekday = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
  * Default 'batch' for backwards compatibility with rows created before the
  * signal-mode schema migration (slice 2).
  */
-export type StrategyKind = "batch" | "signal";
+export type StrategyKind = "batch" | "signal" | "condition";
 
 /**
  * Direction filter for signal-mode strategies. Ignored for batch-mode.
@@ -80,6 +80,18 @@ export interface TrailConfig {
   y: number;
 }
 
+export interface IndexTrigger {
+  type: "points" | "percent";
+  value: number;
+  direction: "up" | "down";
+}
+
+export interface VixCondition {
+  operator: "between" | ">=" | "<=";
+  val1: number;
+  val2?: number | null;
+}
+
 export interface Leg {
   id: number;
   segment: Segment;
@@ -95,6 +107,8 @@ export interface Leg {
   strike_mode?: StrikeMode | null;
   atm_offset?: string | null;
   strike_value?: number | null;
+  premium_min?: number | null;
+  premium_max?: number | null;
 
   // --- Signal-mode fields (null/undefined for batch-mode legs) ---
   symbol?: string | null;
@@ -156,6 +170,8 @@ export interface StrategyCreate {
   lock_profit?: LockProfitConfig | null;
   trail_sl_to_entry: boolean;
   scheduler?: SchedulerConfig | null;
+  index_trigger?: IndexTrigger | null;
+  vix_condition?: VixCondition | null;
   webhook_ip_allowlist?: WebhookIpAllowlistEntry[] | null;
   daily_loss_limit_inr?: number | null;
 }
@@ -186,6 +202,8 @@ export interface Strategy {
   lock_profit?: LockProfitConfig | null;
   trail_sl_to_entry: boolean;
   scheduler?: SchedulerConfig | null;
+  index_trigger?: IndexTrigger | null;
+  vix_condition?: VixCondition | null;
   live_enabled: boolean;
   webhook_url: string;
   webhook_ip_allowlist?: WebhookIpAllowlistEntry[] | null;
@@ -329,6 +347,7 @@ export const ATM_OFFSETS: string[] = [
 export const STRATEGY_KIND_LABELS: Record<StrategyKind, string> = {
   batch: "Multi-leg (batch)",
   signal: "Signal-driven (TradingView)",
+  condition: "Condition-driven",
 };
 
 /** One-line hint shown under the kind picker so the user knows which
@@ -338,6 +357,8 @@ export const STRATEGY_KIND_HINT: Record<StrategyKind, string> = {
     "All legs entered together on start; exited together on stop. Best for option spreads.",
   signal:
     "Each leg reacts to long_entry / long_exit / short_entry / short_exit signals.",
+  condition:
+    "Monitors live index prices and triggers execution when price or VIX conditions are met.",
 };
 
 /** Labels for the direction radio. */

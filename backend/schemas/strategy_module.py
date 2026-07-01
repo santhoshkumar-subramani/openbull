@@ -28,6 +28,28 @@ class TrailConfig(BaseModel):
     y: float = Field(0, ge=0, description="Trail step (pts) once armed")
 
 
+class IndexTrigger(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["points", "percent"]
+    value: float = Field(..., gt=0)
+    direction: Literal["up", "down"]
+
+
+class VixCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operator: Literal["between", ">=", "<="]
+    val1: float = Field(..., ge=0)
+    val2: Optional[float] = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_between(self) -> "VixCondition":
+        if self.operator == "between" and self.val2 is None:
+            raise ValueError("val2 required when operator='between'")
+        return self
+
+
 class Leg(BaseModel):
     """One leg in a strategy.
 
@@ -72,13 +94,15 @@ class Leg(BaseModel):
     position: Literal["B", "S"] = "B"
 
     option_type: Optional[Literal["CE", "PE"]] = None
-    strike_mode: Optional[Literal["atm", "strike"]] = None
+    strike_mode: Optional[Literal["atm", "strike", "premium_range"]] = None
     atm_offset: Optional[str] = Field(
         None,
         pattern=r"^(ATM|ATM[+-]\d+|ITM\d+|OTM\d+)$",
         description="ATM, ATM+1, ATM-1, ITM2, OTM3, etc.",
     )
     strike_value: Optional[float] = Field(None, gt=0)
+    premium_min: Optional[float] = Field(None, ge=0)
+    premium_max: Optional[float] = Field(None, ge=0)
 
     # --- Signal-mode fields (None for batch-mode legs) ---
     symbol: Optional[str] = Field(None, min_length=1, max_length=50)
@@ -105,6 +129,10 @@ class Leg(BaseModel):
                 raise ValueError("atm_offset required when strike_mode='atm'")
             if self.strike_mode == "strike" and self.strike_value is None:
                 raise ValueError("strike_value required when strike_mode='strike'")
+            if self.strike_mode == "premium_range" and (self.premium_min is None or self.premium_max is None):
+                raise ValueError("premium_min and premium_max required when strike_mode='premium_range'")
+            if self.strike_mode == "premium_range" and self.premium_min >= self.premium_max:
+                raise ValueError("premium_min must be less than premium_max")
         else:
             # Non-options legs must not carry option-only fields.
             if self.option_type is not None:
@@ -159,7 +187,7 @@ _STRATEGY_TYPE = Literal["intraday", "positional"]
 _UNIVERSE_TAB = Literal["weekly_monthly", "monthly_only", "stocks_fno", "mcx"]
 _PRODUCT = Literal["NRML", "MIS", "CNC"]
 _PRICETYPE = Literal["MARKET", "LIMIT"]
-_STRATEGY_KIND = Literal["batch", "signal"]
+_STRATEGY_KIND = Literal["batch", "signal", "condition"]
 _DIRECTION = Literal["long_only", "short_only", "both"]
 
 # MCX commodity contracts are monthly-only (verified from symtoken: every
@@ -311,6 +339,9 @@ class StrategyCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_legs_per_kind(self) -> "StrategyCreate":
+        if self.strategy_kind == "condition" and self.index_trigger is None:
+            raise ValueError("index_trigger is required for condition strategies")
+            
         _validate_legs_for_kind(self.strategy_kind, self.legs)
         _validate_tab_expiries(self.universe_tab, self.legs)
         _validate_product_vs_segments(self.product, self.legs)
@@ -361,6 +392,8 @@ class StrategyUpdate(BaseModel):
     trail_sl_to_entry: Optional[bool] = None
 
     scheduler: Optional[SchedulerConfig] = None
+    index_trigger: Optional[IndexTrigger] = None
+    vix_condition: Optional[VixCondition] = None
 
     webhook_ip_allowlist: Optional[List[WebhookIpAllowlistEntry]] = None
     daily_loss_limit_inr: Optional[float] = Field(None, gt=0)
@@ -423,6 +456,8 @@ class StrategyOut(BaseModel):
     lock_profit: Optional[LockProfitConfig]
     trail_sl_to_entry: bool
     scheduler: Optional[SchedulerConfig]
+    index_trigger: Optional[IndexTrigger] = None
+    vix_condition: Optional[VixCondition] = None
 
     live_enabled: bool
     webhook_url: str = Field(..., description="Public webhook URL for this strategy (token embedded)")

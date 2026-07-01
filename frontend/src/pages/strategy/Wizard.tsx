@@ -58,6 +58,7 @@ import {
   type StrategyType,
   type StrategyUpdate,
   type UniverseTab,
+  type Weekday,
 } from "@/types/strategy_module";
 import { cn } from "@/lib/utils";
 
@@ -298,8 +299,8 @@ function LegCard({
 
             <div className="space-y-1.5">
               <Label className="text-xs uppercase">Strike mode</Label>
-              <div className="flex h-9 overflow-hidden rounded-md border border-input">
-                {(["atm", "strike"] as const).map((m) => (
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:h-9 sm:overflow-hidden sm:rounded-md sm:border sm:border-input">
+                {(["atm", "strike", "premium_range"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -309,16 +310,18 @@ function LegCard({
                         strike_mode: m,
                         atm_offset: m === "atm" ? leg.atm_offset ?? "ATM" : null,
                         strike_value: m === "strike" ? leg.strike_value ?? null : null,
+                        premium_min: m === "premium_range" ? leg.premium_min ?? 0 : null,
+                        premium_max: m === "premium_range" ? leg.premium_max ?? 0 : null,
                       });
                     }}
                     className={cn(
-                      "flex-1 text-sm font-medium transition-colors",
+                      "flex-1 px-2 py-1.5 sm:py-0 text-xs font-medium transition-colors sm:border-r last:border-r-0 border-input",
                       leg.strike_mode === m
                         ? "bg-primary text-primary-foreground"
                         : "bg-background hover:bg-muted",
                     )}
                   >
-                    {m === "atm" ? "ATM-relative" : "Direct strike"}
+                    {m === "atm" ? "ATM-relative" : m === "strike" ? "Direct strike" : "Premium Range"}
                   </button>
                 ))}
               </div>
@@ -338,6 +341,34 @@ function LegCard({
                     </option>
                   ))}
                 </select>
+              </div>
+            ) : leg.strike_mode === "premium_range" ? (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className="text-xs uppercase">Premium Range (₹)</Label>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={leg.premium_min ?? ""}
+                    onChange={(e) => update("premium_min", e.target.value ? Number(e.target.value) : null)}
+                    placeholder="Min"
+                    className="h-9"
+                  />
+                  <span className="text-muted-foreground text-sm">to</span>
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={leg.premium_max ?? ""}
+                    onChange={(e) => update("premium_max", e.target.value ? Number(e.target.value) : null)}
+                    placeholder="Max"
+                    className="h-9"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Selects longest OTM strike matching the range at execution time.
+                </p>
               </div>
             ) : (
               <div className="space-y-1.5 sm:col-span-2">
@@ -646,8 +677,8 @@ function SignalLegCard({
 
             <div className="space-y-1.5">
               <Label className="text-xs uppercase">Strike mode</Label>
-              <div className="flex h-9 overflow-hidden rounded-md border border-input">
-                {(["atm", "strike"] as const).map((m) => (
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:h-9 sm:overflow-hidden sm:rounded-md sm:border sm:border-input">
+                {(["atm", "strike", "premium_range"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -658,16 +689,18 @@ function SignalLegCard({
                         atm_offset: m === "atm" ? leg.atm_offset ?? "ATM" : null,
                         strike_value:
                           m === "strike" ? leg.strike_value ?? null : null,
+                        premium_min: m === "premium_range" ? leg.premium_min ?? 0 : null,
+                        premium_max: m === "premium_range" ? leg.premium_max ?? 0 : null,
                       });
                     }}
                     className={cn(
-                      "flex-1 text-sm font-medium transition-colors",
+                      "flex-1 px-2 py-1.5 sm:py-0 text-xs font-medium transition-colors sm:border-r last:border-r-0 border-input",
                       leg.strike_mode === m
                         ? "bg-primary text-primary-foreground"
                         : "bg-background hover:bg-muted",
                     )}
                   >
-                    {m === "atm" ? "ATM-relative" : "Direct strike"}
+                    {m === "atm" ? "ATM-relative" : m === "strike" ? "Direct strike" : "Premium Range"}
                   </button>
                 ))}
               </div>
@@ -687,6 +720,34 @@ function SignalLegCard({
                     </option>
                   ))}
                 </select>
+              </div>
+            ) : leg.strike_mode === "premium_range" ? (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className="text-xs uppercase">Premium Range (₹)</Label>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={leg.premium_min ?? ""}
+                    onChange={(e) => update("premium_min", e.target.value ? Number(e.target.value) : null)}
+                    placeholder="Min"
+                    className="h-9"
+                  />
+                  <span className="text-muted-foreground text-sm">to</span>
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={leg.premium_max ?? ""}
+                    onChange={(e) => update("premium_max", e.target.value ? Number(e.target.value) : null)}
+                    placeholder="Max"
+                    className="h-9"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Selects longest OTM strike matching the range at execution time.
+                </p>
               </div>
             ) : (
               <div className="space-y-1.5 sm:col-span-2">
@@ -949,6 +1010,30 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
   const [schedulerStop, setSchedulerStop] = useState<string>(
     editing?.scheduler?.auto_stop_time ?? "",
   );
+  const [schedulerDays, setSchedulerDays] = useState<Weekday[]>(
+    editing?.scheduler?.days ?? ["MON", "TUE", "WED", "THU", "FRI"],
+  );
+
+  // ---- Section E: Condition Triggers ----
+  const [indexTriggerType, setIndexTriggerType] = useState<"points" | "percent">(
+    editing?.index_trigger?.type ?? "points"
+  );
+  const [indexTriggerValue, setIndexTriggerValue] = useState<string>(
+    editing?.index_trigger?.value != null ? String(editing.index_trigger.value) : ""
+  );
+  const [indexTriggerDir, setIndexTriggerDir] = useState<"up" | "down">(
+    editing?.index_trigger?.direction ?? "up"
+  );
+  
+  const [vixOp, setVixOp] = useState<"between" | ">=" | "<=">(
+    editing?.vix_condition?.operator ?? "between"
+  );
+  const [vixVal1, setVixVal1] = useState<string>(
+    editing?.vix_condition?.val1 != null ? String(editing.vix_condition.val1) : ""
+  );
+  const [vixVal2, setVixVal2] = useState<string>(
+    editing?.vix_condition?.val2 != null ? String(editing.vix_condition.val2) : ""
+  );
 
   const onTabChange = (next: UniverseTab) => {
     setTab(next);
@@ -1118,10 +1203,24 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
       scheduler: schedulerEnabled
         ? {
             enabled: true,
-            days: ["MON", "TUE", "WED", "THU", "FRI"],
+            days: schedulerDays,
             start_time: schedulerStart,
             auto_stop_time: schedulerStop || null,
             default_mode: "sandbox",
+          }
+        : null,
+      index_trigger: kind === "condition" && indexTriggerValue
+        ? {
+            type: indexTriggerType,
+            value: Number(indexTriggerValue),
+            direction: indexTriggerDir,
+          }
+        : null,
+      vix_condition: kind === "condition" && vixVal1
+        ? {
+            operator: vixOp,
+            val1: Number(vixVal1),
+            val2: vixVal2 ? Number(vixVal2) : null,
           }
         : null,
       webhook_ip_allowlist: null,
@@ -1569,10 +1668,9 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
       {/* Scheduler */}
       <Card>
         <CardHeader>
-          <CardTitle>Scheduler</CardTitle>
+          <CardTitle>Scheduler & Active Days</CardTitle>
           <CardDescription>
-            Optional cron-based start. Mon–Fri default. Times are interpreted
-            in IST (Asia/Kolkata).
+            Optional cron-based start. Select which days the strategy runs. Times are interpreted in IST (Asia/Kolkata).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1582,25 +1680,45 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
               checked={schedulerEnabled}
               onChange={(e) => setSchedulerEnabled(e.target.checked)}
             />
-            Enable scheduled start (Mon–Fri)
+            Enable schedule & day filters
           </label>
           {schedulerEnabled && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label>Start time (IST)</Label>
-                <Input
-                  type="time"
-                  value={schedulerStart}
-                  onChange={(e) => setSchedulerStart(e.target.value)}
-                />
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                {["MON", "TUE", "WED", "THU", "FRI"].map((day) => (
+                  <label key={day} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={schedulerDays.includes(day as Weekday)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSchedulerDays([...schedulerDays, day as Weekday]);
+                        } else {
+                          setSchedulerDays(schedulerDays.filter((d) => d !== day));
+                        }
+                      }}
+                    />
+                    {day}
+                  </label>
+                ))}
               </div>
-              <div className="space-y-1.5">
-                <Label>Auto-stop time (optional)</Label>
-                <Input
-                  type="time"
-                  value={schedulerStop}
-                  onChange={(e) => setSchedulerStop(e.target.value)}
-                />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>Start time (IST)</Label>
+                  <Input
+                    type="time"
+                    value={schedulerStart}
+                    onChange={(e) => setSchedulerStart(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Auto-stop time (optional)</Label>
+                  <Input
+                    type="time"
+                    value={schedulerStop}
+                    onChange={(e) => setSchedulerStop(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -1610,6 +1728,96 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
           </p>
         </CardContent>
       </Card>
+
+      {/* Condition Triggers */}
+      {kind === "condition" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Condition Triggers</CardTitle>
+            <CardDescription>
+              Configure the exact index movement or VIX values required to trigger entry.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Index Trigger Type</Label>
+                <div className="flex items-center gap-2">
+                  <select 
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={indexTriggerType} 
+                    onChange={(e) => setIndexTriggerType(e.target.value as "points" | "percent")}
+                  >
+                    <option value="points">Points Change</option>
+                    <option value="percent">Percent Change</option>
+                  </select>
+                  <select 
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={indexTriggerDir} 
+                    onChange={(e) => setIndexTriggerDir(e.target.value as "up" | "down")}
+                  >
+                    <option value="up">Up (Positive)</option>
+                    <option value="down">Down (Negative)</option>
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Index Trigger Value</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={indexTriggerType === "percent" ? 0.01 : 1}
+                  value={indexTriggerValue}
+                  onChange={(e) => setIndexTriggerValue(e.target.value)}
+                  placeholder={indexTriggerType === "percent" ? "e.g., 0.5 for 0.5%" : "e.g., 100 points"}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>India VIX Operator</Label>
+                <select 
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  value={vixOp} 
+                  onChange={(e) => setVixOp(e.target.value as "between" | ">=" | "<=")}
+                >
+                  <option value="between">Is Between</option>
+                  <option value=">=">Greater Than or Equal (&gt;=)</option>
+                  <option value="<=">Less Than or Equal (&lt;=)</option>
+                </select>
+              </div>
+              <div className="space-y-1.5 flex gap-2">
+                <div className="flex-1 space-y-1.5">
+                  <Label>VIX Value 1</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={vixVal1}
+                    onChange={(e) => setVixVal1(e.target.value)}
+                    placeholder={vixOp === "between" ? "Min VIX" : "VIX Value"}
+                  />
+                </div>
+                {vixOp === "between" && (
+                  <div className="flex-1 space-y-1.5">
+                    <Label>VIX Value 2</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={vixVal2}
+                      onChange={(e) => setVixVal2(e.target.value)}
+                      placeholder="Max VIX"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
 
       <div className="flex items-center justify-end gap-3">
         <Button

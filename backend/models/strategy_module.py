@@ -100,6 +100,8 @@ class SmStrategy(Base):
     trail_sl_to_entry = Column(Boolean, nullable=False, default=False)
 
     scheduler = Column(JSONB, nullable=True)
+    index_trigger = Column(JSONB, nullable=True)
+    vix_condition = Column(JSONB, nullable=True)
 
     live_enabled = Column(Boolean, nullable=False, default=False)
     webhook_token_hash = Column(String(64), nullable=False, unique=True)
