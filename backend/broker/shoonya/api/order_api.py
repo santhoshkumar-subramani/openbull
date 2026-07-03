@@ -110,20 +110,35 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
     if exchange in ("NFO", "BFO", "MCX") and pricetype == "MARKET":
         try:
             from backend.broker.shoonya.api.data import get_quotes
-            from backend.services.market_data_cache import get_ltp_value
+            from backend.services.market_data_cache import get_ltp_value, get_quote
             from backend.broker.shoonya.mapping.transform_data import map_product_type
             
             symbol = str(data.get("symbol", ""))
             
-            # 1. Try to get LTP from live websocket cache
-            ltp = get_ltp_value(symbol, exchange) or 0.0
-            price_source = "live websocket cache"
+            # 1. Try to get LTP and circuits from live websocket cache
+            lc = 0.0
+            uc = 0.0
+            ltp = 0.0
+            price_source = ""
+            
+            live_quote = get_quote(symbol, exchange)
+            if live_quote:
+                ltp = float(live_quote.get("ltp") or 0.0)
+                lc = float(live_quote.get("lower_circuit") or 0.0)
+                uc = float(live_quote.get("upper_circuit") or 0.0)
+                
+            if ltp > 0.0:
+                price_source = "live websocket cache"
             
             # 2. Fallback to Shoonya REST API GetQuotes
             if ltp == 0.0:
                 quote = get_quotes(symbol, exchange, auth_token, config)
-                ltp = quote.get("ltp", 0.0)
-                price_source = "Shoonya REST API GetQuotes"
+                ltp = float(quote.get("lp") or quote.get("ltp") or 0.0)
+                # Shoonya REST quote uses 'lc' and 'uc' or 'lower_circuit'
+                lc = float(quote.get("lc") or quote.get("lower_circuit") or lc)
+                uc = float(quote.get("uc") or quote.get("upper_circuit") or uc)
+                if ltp > 0.0:
+                    price_source = "Shoonya REST API GetQuotes"
                     
             # 3. Fallback to open position average price (if closing position)
             if ltp == 0.0:
@@ -161,6 +176,14 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
                 
                 # Round to nearest 0.05 tick size
                 fallback_price = round(fallback_price / 0.05) * 0.05
+                
+                # Clamp the price within execution range (circuit limits) to prevent exchange rejections
+                if lc > 0.0 and fallback_price < lc:
+                    logger.info("Clamping fallback price %.2f to lower circuit %.2f to prevent rejection", fallback_price, lc)
+                    fallback_price = lc
+                if uc > 0.0 and fallback_price > uc:
+                    logger.info("Clamping fallback price %.2f to upper circuit %.2f to prevent rejection", fallback_price, uc)
+                    fallback_price = uc
                 
                 # Make a shallow copy so we don't mutate the caller's dict unexpectedly
                 data = data.copy()

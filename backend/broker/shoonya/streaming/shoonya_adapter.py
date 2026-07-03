@@ -414,6 +414,8 @@ class ShoonyaAdapter(BaseBrokerAdapter):
             "change": change,
             "change_percent": change_pct,
             "oi": int(state.get("oi", 0) or 0),
+            "lower_circuit": float(state.get("lc", 0) or 0),
+            "upper_circuit": float(state.get("uc", 0) or 0),
             "ltt": int(time.time()),
         }
         self.publish(f"{exchange}_{symbol}_QUOTE", quote_data)
@@ -473,6 +475,8 @@ class ShoonyaAdapter(BaseBrokerAdapter):
             "change": change,
             "change_percent": change_pct,
             "oi": int(state.get("oi", 0) or 0),
+            "lower_circuit": float(state.get("lc", 0) or 0),
+            "upper_circuit": float(state.get("uc", 0) or 0),
             "ltt": int(time.time()),
             "depth": {"buy": bids, "sell": asks},
         }
