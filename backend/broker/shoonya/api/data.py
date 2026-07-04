@@ -86,6 +86,66 @@ def _api_exchange(exchange: str) -> str:
     return exchange
 
 
+def _fetch_quote_with_fallback(
+    payload: dict,
+    jkey: str,
+    expected_token: str,
+    symbol: str,
+    exchange: str,
+    context: str,
+    max_attempts: int = 3,
+) -> dict:
+    """Fetch quote data with GetQuotesMF first, then GetQuotes retries as backup."""
+    result = _post("GetQuotesMF", payload, jkey)
+    mf_stat = result.get("stat")
+    mf_token = result.get("token")
+
+    if mf_stat == "Ok" and str(mf_token) == str(expected_token):
+        logger.debug("Shoonya GetQuotesMF success for %s/%s token=%s", symbol, exchange, expected_token)
+        return result
+
+    logger.error(
+        "Shoonya GetQuotesMF failed or token mismatch for %s/%s (%s). Requested token=%s, stat=%s, resp_token=%s, emsg=%s. Falling back to GetQuotes.",
+        symbol,
+        exchange,
+        context,
+        expected_token,
+        mf_stat,
+        mf_token,
+        result.get("emsg"),
+    )
+
+    for attempt in range(max_attempts):
+        result = _post("GetQuotes", payload, jkey)
+        if result.get("stat") != "Ok":
+            raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
+
+        resp_token = result.get("token")
+        if str(resp_token) == str(expected_token):
+            return result
+
+        logger.warning(
+            "Shoonya %s token mismatch (attempt %d/%d). Requested: %s, Got: %s for %s. Raw quote: %s",
+            context,
+            attempt + 1,
+            max_attempts,
+            expected_token,
+            resp_token,
+            symbol,
+            json.dumps(result),
+        )
+        if attempt < max_attempts - 1:
+            time.sleep(0.1)
+
+    logger.error(
+        "Shoonya %s failed to return correct token after %d attempts for %s.",
+        context,
+        max_attempts,
+        symbol,
+    )
+    return result
+
+
 # ---------- Quotes ----------
 
 def get_quotes(
@@ -95,6 +155,17 @@ def get_quotes(
     uid, jkey, _ = _split_token(auth_token)
     token = get_token_from_cache(symbol, exchange)
     if not token:
+        # Fallback for indices which might not be in symtoken
+        if symbol == "SENSEX":
+            token = "1"
+        elif symbol == "NIFTY":
+            token = "26000"
+        elif symbol == "BANKNIFTY":
+            token = "26009"
+        elif symbol == "INDIAVIX":
+            token = "26017"
+            
+    if not token:
         raise Exception(f"Instrument token not found for {symbol}/{exchange}")
 
     api_exch = _api_exchange(exchange)
@@ -102,31 +173,17 @@ def get_quotes(
 
     logger.info("SHOONYA GetQuotes REQUEST: symbol=%s, exchange=%s -> Sending payload: %s", symbol, exchange, payload)
 
-    max_attempts = 3
-    result = {}
-    
-    for attempt in range(max_attempts):
-        result = _post("GetQuotes", payload, jkey)
-        if result.get("stat") != "Ok":
-            raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
-
-        resp_token = result.get("token")
-        if str(resp_token) == str(token):
-            break
-            
-        logger.warning(
-            "Shoonya GetQuotes token mismatch (attempt %d/%d). Requested: %s, Got: %s for %s. Raw quote: %s", 
-            attempt + 1, max_attempts, token, resp_token, symbol, json.dumps(result)
-        )
-        if attempt < max_attempts - 1:
-            time.sleep(0.1)
+    result = _fetch_quote_with_fallback(
+        payload=payload,
+        jkey=jkey,
+        expected_token=str(token),
+        symbol=symbol,
+        exchange=exchange,
+        context="GetQuotes",
+    )
 
     ltp = float(result.get("lp", 0) or 0)
-    
-    # If after max attempts we still have a mismatch, zero out the LTP to be safe 
-    # and prevent absurd index prices from filling sandbox option orders.
     if str(result.get("token")) != str(token):
-        logger.error("Shoonya GetQuotes failed to return correct token after %d attempts for %s.", max_attempts, symbol)
         ltp = 0.0
 
     return {
@@ -186,31 +243,31 @@ def get_market_depth(
     uid, jkey, _ = _split_token(auth_token)
     token = get_token_from_cache(symbol, exchange)
     if not token:
+        if symbol == "SENSEX":
+            token = "1"
+        elif symbol == "NIFTY":
+            token = "26000"
+        elif symbol == "BANKNIFTY":
+            token = "26009"
+        elif symbol == "INDIAVIX":
+            token = "26017"
+
+    if not token:
         raise Exception(f"Instrument token not found for {symbol}/{exchange}")
 
     api_exch = _api_exchange(exchange)
     payload = {"uid": uid, "exch": api_exch, "token": token}
 
-    max_attempts = 3
-    result = {}
-    for attempt in range(max_attempts):
-        result = _post("GetQuotes", payload, jkey)
-        if result.get("stat") != "Ok":
-            raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
-            
-        resp_token = result.get("token")
-        if str(resp_token) == str(token):
-            break
-            
-        logger.warning(
-            "Shoonya GetMarketDepth token mismatch (attempt %d/%d). Requested: %s, Got: %s for %s.", 
-            attempt + 1, max_attempts, token, resp_token, symbol
-        )
-        if attempt < max_attempts - 1:
-            time.sleep(0.1)
+    result = _fetch_quote_with_fallback(
+        payload=payload,
+        jkey=jkey,
+        expected_token=str(token),
+        symbol=symbol,
+        exchange=exchange,
+        context="GetMarketDepth",
+    )
 
     if str(result.get("token")) != str(token):
-        logger.error("Shoonya GetMarketDepth failed to return correct token after %d attempts for %s.", max_attempts, symbol)
         # Return empty data instead of corrupted index depth
         return {
             "bids": [], "asks": [],

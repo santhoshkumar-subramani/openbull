@@ -130,7 +130,7 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
             if ltp > 0.0:
                 price_source = "live websocket cache"
             
-            # 2. Fallback to Shoonya REST API GetQuotes
+            # 2. Fallback to Shoonya REST API quote (GetQuotesMF primary, GetQuotes backup)
             if ltp == 0.0:
                 quote = get_quotes(symbol, exchange, auth_token, config)
                 ltp = float(quote.get("lp") or quote.get("ltp") or 0.0)
@@ -138,7 +138,7 @@ def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> 
                 lc = float(quote.get("lc") or quote.get("lower_circuit") or lc)
                 uc = float(quote.get("uc") or quote.get("upper_circuit") or uc)
                 if ltp > 0.0:
-                    price_source = "Shoonya REST API GetQuotes"
+                    price_source = "Shoonya REST API quote (MF->GetQuotes fallback)"
                     
             # 3. Fallback to open position average price (if closing position)
             if ltp == 0.0:
