@@ -143,6 +143,12 @@ class ShoonyaAdapter(BaseBrokerAdapter):
 
                 token_str = get_token_from_cache(sym, exch)
                 if not token_str:
+                    if sym == "SENSEX": token_str = "1"
+                    elif sym == "NIFTY": token_str = "26000"
+                    elif sym == "BANKNIFTY": token_str = "26009"
+                    elif sym == "INDIAVIX": token_str = "26017"
+
+                if not token_str:
                     logger.warning("Shoonya subscribe: token not found for %s/%s", sym, exch)
                     continue
 

@@ -83,7 +83,7 @@ export interface TrailConfig {
 export interface IndexTrigger {
   type: "points" | "percent";
   value: number;
-  direction: "up" | "down";
+  direction: "up" | "down" | "up_or_down";
 }
 
 export interface VixCondition {

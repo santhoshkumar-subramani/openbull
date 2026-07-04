@@ -26,6 +26,8 @@ import re
 from datetime import datetime
 from typing import Any, Optional
 
+from backend.services.quotes_service import get_multi_quotes_with_auth
+
 from backend.services.market_data_service import get_expiry_dates
 from backend.services.option_symbol_service import (
     _format_strike,
@@ -48,6 +50,15 @@ def option_exchange_for(underlying_exchange: str) -> str:
     """
     return _option_exchange_for(underlying_exchange)
 
+def _map_option_base(underlying: str, exchange: str) -> str:
+    """Map index underlying names to their options base symbols on Shoonya."""
+    exch = exchange.upper()
+    u = underlying.strip().upper()
+    if exch in ("BSE_INDEX", "BFO", "BSE"):
+        if u == "SENSEX": return "BSXOPT"
+        if u == "BANKEX": return "BKXOPT"
+        if u == "SENSEX50": return "SX50OPT"
+    return u
 
 def _parse_iso_expiry(s: str) -> Optional[datetime]:
     """Parse a ``DD-MMM-YY`` (DB) or ``DDMMMYY`` (symbol) expiry string."""
@@ -155,7 +166,7 @@ def resolve_atm(
     """
     expiry_compact = expiry_date.replace("-", "").upper()
     return get_option_symbol(
-        underlying=underlying,
+        base=_map_option_base(underlying, underlying_exchange),
         exchange=underlying_exchange,
         expiry_date=expiry_compact,
         offset=atm_offset,
@@ -182,7 +193,7 @@ def resolve_direct_strike(
     confirm. Returns the same shape as `resolve_atm` so callers can branch
     on `strike_mode` and otherwise treat them uniformly.
     """
-    base = underlying.strip().upper()
+    base = _map_option_base(underlying, underlying_exchange)
     opt_exchange = option_exchange_for(underlying_exchange)
 
     # Accept either format on input; normalize to symbol-embedded form.
@@ -214,6 +225,101 @@ def resolve_direct_strike(
     }, 200
 
 
+def resolve_premium_range(
+    *,
+    underlying: str,
+    underlying_exchange: str,
+    expiry_date: str,
+    premium_min: float,
+    premium_max: float,
+    option_type: str,
+    position: str,
+    auth_token: str,
+    broker: str,
+    config: Optional[dict] = None,
+) -> tuple[bool, dict[str, Any], int]:
+    """Resolve a premium range to a tradable symbol by fetching quotes.
+    For Sell ("S") orders, picks the longest OTM strike (highest for CE, lowest for PE) to reduce risk.
+    For Buy ("B") orders, picks the nearest strike to ATM (lowest for CE, highest for PE) within the premium range.
+    """
+    from backend.services.option_symbol_service import _fetch_available_strikes
+    
+    base = _map_option_base(underlying, underlying_exchange)
+    opt_exchange = option_exchange_for(underlying_exchange)
+    expiry_compact = expiry_date.replace("-", "").upper()
+    if not re.match(r"^\d{2}[A-Z]{3}\d{2}$", expiry_compact):
+        return False, {"status": "error", "message": f"Invalid expiry: {expiry_date}"}, 400
+
+    option_type_u = option_type.upper()
+    if option_type_u not in ("CE", "PE"):
+        return False, {"status": "error", "message": "option_type must be CE or PE"}, 400
+
+    strikes = _fetch_available_strikes(base, expiry_compact, option_type_u, opt_exchange)
+    if not strikes:
+        return False, {"status": "error", "message": f"No strikes found for {base} {expiry_compact} {option_type_u}"}, 404
+
+    # Build symbols for all strikes
+    # Option symbols format: {base}{DDMMMYY}{strike}{CE|PE}
+    symbol_map = {} # strike -> symbol
+    req_symbols = []
+    for strike in strikes:
+        symbol = f"{base}{expiry_compact}{_format_strike(strike)}{option_type_u}"
+        symbol_map[strike] = symbol
+        req_symbols.append({"symbol": symbol, "exchange": opt_exchange})
+        
+    ok, data, code = get_multi_quotes_with_auth(req_symbols, auth_token, broker, config)
+    if not ok:
+        return False, {"status": "error", "message": f"Quote fetch failed: {data.get('message')}"}, 500
+        
+    results = data.get("results") or []
+    quote_map = {}
+    for res in results:
+        sym = res.get("symbol")
+        ltp = res.get("ltp")
+        if sym and ltp is not None:
+            quote_map[sym] = float(ltp)
+            
+    # Find matching strikes
+    matching_strikes = []
+    for strike in strikes:
+        symbol = symbol_map[strike]
+        ltp = quote_map.get(symbol)
+        if ltp is not None and premium_min <= ltp <= premium_max:
+            matching_strikes.append(strike)
+            
+    if not matching_strikes:
+        return False, {"status": "error", "message": f"No {option_type_u} strike found with premium between {premium_min} and {premium_max}"}, 404
+        
+    if position == "B":
+        # Buy leg: Nearest strike (closest to ATM): lowest for CE, highest for PE
+        if option_type_u == "CE":
+            chosen_strike = min(matching_strikes)
+        else:
+            chosen_strike = max(matching_strikes)
+    else:
+        # Sell leg: Longest OTM (furthest from ATM): highest for CE, lowest for PE
+        if option_type_u == "CE":
+            chosen_strike = max(matching_strikes)
+        else:
+            chosen_strike = min(matching_strikes)
+        
+    chosen_symbol = symbol_map[chosen_strike]
+    details = _lookup_option_in_db(chosen_symbol, opt_exchange)
+    if not details:
+        return False, {"status": "error", "message": f"Option {chosen_symbol} not found in DB"}, 404
+        
+    return True, {
+        "status": "success",
+        "symbol": details["symbol"],
+        "exchange": details["exchange"],
+        "lotsize": details["lotsize"],
+        "tick_size": details["tick_size"],
+        "strike": details["strike"],
+        "expiry": details["expiry"],
+        "underlying_ltp": None, 
+    }, 200
+
+
 def list_strikes(
     *,
     underlying: str,
@@ -229,7 +335,7 @@ def list_strikes(
     """
     from backend.services.option_symbol_service import _fetch_available_strikes
 
-    base = underlying.strip().upper()
+    base = _map_option_base(underlying, underlying_exchange)
     opt_exchange = option_exchange_for(underlying_exchange)
     expiry_compact = expiry_date.replace("-", "").upper()
     if not re.match(r"^\d{2}[A-Z]{3}\d{2}$", expiry_compact):
@@ -334,6 +440,6 @@ def list_expiries(
     """Return sorted expiry dates for an underlying. Thin wrapper over the
     existing market_data_service helper, with the option-exchange mapping
     applied so callers can pass the underlying's exchange directly."""
-    base = underlying.strip().upper()
+    base = _map_option_base(underlying, underlying_exchange)
     opt_exchange = option_exchange_for(underlying_exchange)
     return get_expiry_dates(base, opt_exchange, instrument)

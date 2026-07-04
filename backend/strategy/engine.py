@@ -172,6 +172,32 @@ def _resolve_leg(
             raise EngineError(f"Leg {leg.get('id')}: {data.get('message', 'direct strike not found')}")
         return data
 
+    if strike_mode == "premium_range":
+        premium_min = leg.get("premium_min")
+        premium_max = leg.get("premium_max")
+        if premium_min is None or premium_max is None:
+            raise EngineError(f"Leg {leg.get('id')}: premium_min and premium_max required for premium_range mode")
+        if not auth_token or not broker:
+            raise EngineError(
+                f"Leg {leg.get('id')}: Premium range resolution needs broker auth — "
+                f"either select live mode (Phase 10) or use direct strikes."
+            )
+        ok, data, _ = symbol_resolver.resolve_premium_range(
+            underlying=underlying,
+            underlying_exchange=underlying_exchange,
+            expiry_date=resolved,
+            premium_min=float(premium_min),
+            premium_max=float(premium_max),
+            option_type=option_type,
+            position=leg.get("position", "S"),
+            auth_token=auth_token,
+            broker=broker,
+            config=config,
+        )
+        if not ok:
+            raise EngineError(f"Leg {leg.get('id')}: {data.get('message', 'premium range resolution failed')}")
+        return data
+
     raise EngineError(f"Leg {leg.get('id')}: unknown strike_mode '{strike_mode}'")
 
 
@@ -240,6 +266,118 @@ async def start_run(
         raise EngineError("Strategy has no legs configured")
 
     # Resolve every leg upfront — fail fast before any order goes out.
+    # For condition-driven strategies, we skip resolution and entry here,
+    # and instead enter a monitoring phase.
+    if strategy.strategy_kind == "condition":
+        run = await repo.start_run(
+            db, strategy=strategy, mode=mode, broker=broker, trigger_source=trigger_source,
+        )
+        try:
+            await state_module.init_run_state(
+                run_id=run.id,
+                strategy_id=strategy.id,
+                strategy_legs=legs,
+                entry_orders_by_leg={},
+            )
+            async with state_module.get_state_lock(run.id):
+                state = await state_module.get_run_state(run.id)
+                if state:
+                    state["condition_monitoring"] = True
+                    await state_module.update_run_state(run.id, condition_monitoring=True)
+        except Exception:
+            logger.exception("Failed to init Redis state for condition-driven run %d", run.id)
+
+        try:
+            # We need ticks for the underlying, and possibly INDIA VIX.
+            symbols = []
+            if strategy.underlying and strategy.underlying_exchange:
+                # Map NSE_INDEX -> NSE and BSE_INDEX -> BSE for the broker tick feed
+                exch = strategy.underlying_exchange
+                if exch == "NSE_INDEX": exch = "NSE"
+                elif exch == "BSE_INDEX": exch = "BSE"
+                symbols.append((exch, strategy.underlying))
+            
+            # Sub to VIX if needed
+            vix_cfg = strategy.vix_condition or {}
+            if vix_cfg:
+                symbols.append(("NSE_INDEX", "INDIAVIX"))
+                
+            if symbols:
+                tick_feed.add_run_subscriptions(run.id, symbols)
+        except Exception:
+            logger.exception("Failed to subscribe ticks for condition-driven run %d", run.id)
+            
+        return run, []
+
+    run = await repo.start_run(
+        db, strategy=strategy, mode=mode, broker=broker, trigger_source=trigger_source,
+    )
+
+    leg_summaries = await _execute_entry_for_run(
+        db, strategy=strategy, run=run, mode=mode, broker=broker, auth_token=auth_token, config=config,
+    )
+    return run, leg_summaries
+
+
+
+async def execute_condition_entry(
+    db: AsyncSession,
+    *,
+    run_id: int,
+) -> None:
+    """Triggered by tick processor when condition is met."""
+    from backend.strategy.live_auth import resolve_live_auth
+
+    # Lock strategy to ensure idempotency
+    run = await db.get(SmStrategyRun, run_id)
+    if not run:
+        return
+    locked = (await db.execute(
+        select(SmStrategy)
+        .where(SmStrategy.id == run.strategy_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if not locked or locked.status != "running":
+        return
+    strategy = locked
+
+    async with state_module.get_state_lock(run.id):
+        state = await state_module.get_run_state(run.id)
+        if not state:
+            return
+        
+        tick_feed.remove_run_subscriptions(run.id)
+
+    # We always need a broker auth context for leg resolution because
+    # resolving ATM or Premium Range strikes requires fetching live option
+    # chains. If live_auth fails, we abort the run.
+    auth_ctx = await resolve_live_auth(db, user_id=strategy.user_id, broker=run.broker)
+    if not auth_ctx:
+        logger.error("No valid broker auth for condition entry on run %d (needs auth for leg resolution)", run.id)
+        await repo.finalize_run(db, run=run, strategy=strategy, stop_reason="auth_failed")
+        return
+    auth_token = auth_ctx.auth_token
+    config = auth_ctx.config
+
+    try:
+        await _execute_entry_for_run(
+            db, strategy=strategy, run=run, mode=run.mode, broker=run.broker,
+            auth_token=auth_token, config=config,
+        )
+    except Exception:
+        logger.exception("Failed to execute condition entry for run %d", run.id)
+
+
+async def _execute_entry_for_run(
+    db: AsyncSession,
+    strategy: SmStrategy,
+    run: SmStrategyRun,
+    mode: str,
+    broker: str,
+    auth_token: Optional[str],
+    config: Optional[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    legs = strategy.legs or []
     expiry_cache: dict[str, list[str]] = {}
     resolved_legs: list[dict[str, Any]] = []
     for leg in legs:
@@ -280,12 +418,6 @@ async def start_run(
             "strike": r.get("strike"),
             "expiry": r.get("expiry"),
         })
-
-    # Open a run row first — so any failure mid-placement is logged against
-    # a real run id (and the cleanup path can square off whatever did fill).
-    run = await repo.start_run(
-        db, strategy=strategy, mode=mode, broker=broker, trigger_source=trigger_source,
-    )
 
     # Place entry orders BUY-before-SELL — same convention as
     # options_multiorder_service. Avoids margin spikes on credit spreads
@@ -437,7 +569,7 @@ async def start_run(
     except Exception:
         logger.exception("Failed to subscribe ticks for run %d", run.id)
 
-    return run, leg_summaries
+    return leg_summaries
 
 
 # ---------------------------------------------------------------------------

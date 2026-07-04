@@ -147,6 +147,13 @@ def _on_tick(tick: dict[str, Any]) -> None:
 
     payload = {"exchange": exchange, "symbol": symbol, "ltp": ltp,
                "run_ids": run_ids}
+               
+    if "close" in data:
+        try:
+            payload["close"] = float(data["close"])
+        except (TypeError, ValueError):
+            pass
+            
     try:
         _loop.call_soon_threadsafe(_tick_queue.put_nowait, payload)
     except RuntimeError:

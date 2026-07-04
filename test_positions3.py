@@ -1,8 +1,7 @@
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from backend.config import get_settings
-from backend.database import get_db
-from backend.strategy import repo
+from backend.strategy import repository as repo
 
 async def main():
     engine = create_async_engine(get_settings().database_url)
@@ -26,17 +25,17 @@ async def main():
                 "symbol": o.symbol,
                 "exchange": o.exchange,
                 "product": strategy.product,
-                "long_qty": 0,
-                "long_val": 0.0,
-                "short_qty": 0,
-                "short_val": 0.0,
+                "buy_qty": 0,
+                "buy_value": 0.0,
+                "sell_qty": 0,
+                "sell_value": 0.0,
             })
-            if o.action.lower() == "buy":
-                a["long_qty"] += fill_qty
-                a["long_val"] += fill_qty * fill_price
+            if (o.action or "").upper() == "BUY":
+                a["buy_qty"] += fill_qty
+                a["buy_value"] += fill_qty * fill_price
             else:
-                a["short_qty"] += fill_qty
-                a["short_val"] += fill_qty * fill_price
+                a["sell_qty"] += fill_qty
+                a["sell_value"] += fill_qty * fill_price
                 
         print("Aggregations:", aggs)
         

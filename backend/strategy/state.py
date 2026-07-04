@@ -115,6 +115,7 @@ def _build_initial_state(
         "lock_floor": None,
         "trail_to_entry_active": False,
         "legs": legs,
+        "condition_monitoring": False,
     }
 
 

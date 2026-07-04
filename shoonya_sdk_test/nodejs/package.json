@@ -1,0 +1,16 @@
+{
+  "name": "openbull-shoonya-sdk-nodejs-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node.js Shoonya SDK validator for OpenBull quote token mismatch checks",
+  "main": "test.js",
+  "scripts": {
+    "test:quotes": "node test.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "fernet": "^0.3.3",
+    "pg": "^8.22.0",
+    "shoonya-api-js": "github:Shoonya-Dev/ShoonyaApi-js"
+  }
+}

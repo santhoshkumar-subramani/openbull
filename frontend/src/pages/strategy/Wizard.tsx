@@ -1021,7 +1021,7 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
   const [indexTriggerValue, setIndexTriggerValue] = useState<string>(
     editing?.index_trigger?.value != null ? String(editing.index_trigger.value) : ""
   );
-  const [indexTriggerDir, setIndexTriggerDir] = useState<"up" | "down">(
+  const [indexTriggerDir, setIndexTriggerDir] = useState<"up" | "down" | "up_or_down">(
     editing?.index_trigger?.direction ?? "up"
   );
   
@@ -1107,11 +1107,16 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
   const createMutation = useMutation({
     mutationFn: (payload: StrategyCreate) => createStrategy(payload),
     onSuccess: (response) => {
-      setRevealedToken({
-        token: response.webhook_token,
-        url: response.strategy.webhook_url,
-        strategyId: response.strategy.id,
-      });
+      if (response.strategy.strategy_kind === "condition") {
+        toast.success("Strategy created successfully");
+        navigate(`/strategy/${response.strategy.id}`);
+      } else {
+        setRevealedToken({
+          token: response.webhook_token,
+          url: response.strategy.webhook_url,
+          strategyId: response.strategy.id,
+        });
+      }
     },
     onError: (err: unknown) => {
       const detail =
@@ -1265,8 +1270,8 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 pt-0">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {(["batch", "signal"] as StrategyKind[]).map((k) => (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {(["batch", "signal", "condition"] as StrategyKind[]).map((k) => (
               <button
                 key={k}
                 type="button"
@@ -1754,10 +1759,11 @@ export default function StrategyWizard({ editing }: StrategyWizardProps = {}) {
                   <select 
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     value={indexTriggerDir} 
-                    onChange={(e) => setIndexTriggerDir(e.target.value as "up" | "down")}
+                    onChange={(e) => setIndexTriggerDir(e.target.value as "up" | "down" | "up_or_down")}
                   >
                     <option value="up">Up (Positive)</option>
                     <option value="down">Down (Negative)</option>
+                    <option value="up_or_down">Up or Down (Absolute)</option>
                   </select>
                 </div>
               </div>

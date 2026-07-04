@@ -86,6 +86,8 @@ def _strategy_out(row: SmStrategy, *, webhook_url: str) -> StrategyOut:
         lock_profit=row.lock_profit,
         trail_sl_to_entry=row.trail_sl_to_entry,
         scheduler=row.scheduler,
+        index_trigger=getattr(row, "index_trigger", None),
+        vix_condition=getattr(row, "vix_condition", None),
         live_enabled=row.live_enabled,
         webhook_url=webhook_url,
         webhook_ip_allowlist=row.webhook_ip_allowlist,

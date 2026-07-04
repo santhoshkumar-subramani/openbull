@@ -92,7 +92,25 @@ async def _resolve_open_symbols(
         if (action or "").upper() != "BUY":
             delta = -delta
         nets[(exchange, symbol)] = nets.get((exchange, symbol), 0) + delta
-    return [k for k, v in nets.items() if v != 0]
+    # Also check if the run is still condition monitoring
+    from backend.strategy.state import get_run_state
+    
+    symbols_set = set(k for k, v in nets.items() if v != 0)
+    
+    # Check if run state is condition monitoring
+    state = await get_run_state(strategy.current_run_id)
+    if state and state.get("condition_monitoring"):
+        if strategy.underlying and strategy.underlying_exchange:
+            exch = strategy.underlying_exchange
+            if exch == "NSE_INDEX": exch = "NSE"
+            elif exch == "BSE_INDEX": exch = "BSE"
+            symbols_set.add((exch, strategy.underlying))
+        
+        vix_cfg = strategy.vix_condition or {}
+        if vix_cfg:
+            symbols_set.add(("NSE_INDEX", "INDIAVIX"))
+            
+    return list(symbols_set)
 
 
 async def _pump_loop(strategy_id: int) -> None:
@@ -178,18 +196,29 @@ async def _one_tick(strategy_id: int) -> None:
             ltp_f = float(ltp)
         except (TypeError, ValueError):
             continue
+            
+        close = inner.get("prev_close") or inner.get("close") or inner.get("c")
+        try:
+            close_f = float(close) if close is not None else None
+        except (TypeError, ValueError):
+            close_f = None
+
         # Feed the cache. mode=1 (LTP) matches what the broker WS adapter
         # writes for LTP-mode subscriptions; tick_feed routes this to
         # the strategy run via its symbol-to-runs index.
+        tick_data = {
+            "ltp": ltp_f,
+            "timestamp": now,
+            "volume": inner.get("volume", 0),
+        }
+        if close_f is not None:
+            tick_data["close"] = close_f
+            
         process_market_data({
             "symbol": sym,
             "exchange": exch,
             "mode": 1,
-            "data": {
-                "ltp": ltp_f,
-                "timestamp": now,
-                "volume": inner.get("volume", 0),
-            },
+            "data": tick_data,
         })
 
 

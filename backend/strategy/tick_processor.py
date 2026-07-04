@@ -126,13 +126,13 @@ async def _process_tick(tick: dict[str, Any]) -> None:
 
     for run_id in run_ids:
         try:
-            await _process_tick_for_run(run_id, exchange, symbol, ltp)
+            await _process_tick_for_run(run_id, exchange, symbol, ltp, tick)
         except Exception:
             logger.exception("Tick processing failed for run %d", run_id)
 
 
 async def _process_tick_for_run(
-    run_id: int, exchange: str, symbol: str, ltp: float
+    run_id: int, exchange: str, symbol: str, ltp: float, tick: dict = None
 ) -> None:
     # Load the strategy row once (overall_sl_mtm / overall_target_mtm /
     # lock_profit / trail_sl_to_entry + per-leg configs) so the tick path
@@ -155,6 +155,31 @@ async def _process_tick_for_run(
     async with state_module.get_state_lock(run_id):
         state = await state_module.get_run_state(run_id)
         if state is None:
+            return
+
+        if state.get("condition_monitoring"):
+            state_changed = False
+            
+            if symbol == strategy_row.underlying:
+                state["underlying_ltp"] = ltp
+                if tick and "close" in tick:
+                    state["underlying_close"] = float(tick["close"])
+                state_changed = True
+            elif symbol == "INDIAVIX":
+                state["vix_ltp"] = ltp
+                state_changed = True
+
+            if state_changed:
+                updates = {}
+                if "underlying_ltp" in state: updates["underlying_ltp"] = state["underlying_ltp"]
+                if "underlying_close" in state: updates["underlying_close"] = state["underlying_close"]
+                if "vix_ltp" in state: updates["vix_ltp"] = state["vix_ltp"]
+                await state_module.update_run_state(run_id, **updates)
+                
+                if await _evaluate_entry_conditions(strategy_row, state):
+                    state["condition_monitoring"] = False
+                    await state_module.update_run_state(run_id, condition_monitoring=False)
+                    asyncio.create_task(_dispatch_condition_entry(run_id))
             return
 
         # Find every leg matching this symbol that's still open.
@@ -553,3 +578,58 @@ async def _trigger_run_stop(run_id: int, stop_reason: str) -> None:
             logger.exception(
                 "Auto-stop_run failed for run %d (reason=%s)", run_id, stop_reason,
             )
+
+async def _evaluate_entry_conditions(strategy: Any, state: dict) -> bool:
+    vix_cfg = strategy.vix_condition if hasattr(strategy, "vix_condition") else None
+    idx_cfg = strategy.index_trigger if hasattr(strategy, "index_trigger") else None
+    
+    # 1. VIX check
+    if vix_cfg:
+        v_ltp = state.get("vix_ltp")
+        if v_ltp is None:
+            logger.info("evaluate_entry_conditions: VIX LTP is None")
+            return False
+        op = vix_cfg.get("operator") if isinstance(vix_cfg, dict) else vix_cfg.operator
+        val1 = float(vix_cfg.get("val1") if isinstance(vix_cfg, dict) else vix_cfg.val1)
+        logger.info(f"evaluate_entry_conditions: VIX {v_ltp} {op} {val1}")
+        if op == ">=" and not (v_ltp >= val1): return False
+        if op == "<=" and not (v_ltp <= val1): return False
+        if op == "between":
+            val2 = float(vix_cfg.get("val2") if isinstance(vix_cfg, dict) else vix_cfg.val2)
+            if not (min(val1, val2) <= v_ltp <= max(val1, val2)): return False
+            
+    # 2. Index trigger check
+    if idx_cfg:
+        i_ltp = state.get("underlying_ltp")
+        i_close = state.get("underlying_close")
+        if i_ltp is None or i_close is None:
+            logger.info(f"evaluate_entry_conditions: Underlying LTP {i_ltp} or close {i_close} is None")
+            return False
+            
+        t = idx_cfg.get("type") if isinstance(idx_cfg, dict) else idx_cfg.type
+        direction = idx_cfg.get("direction") if isinstance(idx_cfg, dict) else idx_cfg.direction
+        val = float(idx_cfg.get("value") if isinstance(idx_cfg, dict) else idx_cfg.value)
+        
+        change_pts = i_ltp - i_close
+        change_pct = (change_pts / i_close) * 100 if i_close > 0 else 0
+        
+        logger.info(f"evaluate_entry_conditions: Index LTP={i_ltp} Close={i_close} Pts={change_pts} Pct={change_pct} Target={val} Dir={direction} Type={t}")
+        
+        if direction == "up":
+            if t == "points" and not (change_pts >= val): return False
+            if t == "percent" and not (change_pct >= val): return False
+        elif direction == "down":
+            if t == "points" and not (change_pts <= -val): return False
+            if t == "percent" and not (change_pct <= -val): return False
+        elif direction == "up_or_down":
+            if t == "points" and not (abs(change_pts) >= val): return False
+            if t == "percent" and not (abs(change_pct) >= val): return False
+            
+    logger.info("evaluate_entry_conditions: RETURN TRUE")
+    return True
+
+async def _dispatch_condition_entry(run_id: int) -> None:
+    from backend.database import async_session
+    from backend.strategy import engine
+    async with async_session() as db:
+        await engine.execute_condition_entry(db, run_id=run_id)

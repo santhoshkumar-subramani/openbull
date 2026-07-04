@@ -33,7 +33,7 @@ class IndexTrigger(BaseModel):
 
     type: Literal["points", "percent"]
     value: float = Field(..., gt=0)
-    direction: Literal["up", "down"]
+    direction: Literal["up", "down", "up_or_down"]
 
 
 class VixCondition(BaseModel):
@@ -324,6 +324,8 @@ class StrategyCreate(BaseModel):
     trail_sl_to_entry: bool = False
 
     scheduler: Optional[SchedulerConfig] = None
+    index_trigger: Optional[IndexTrigger] = None
+    vix_condition: Optional[VixCondition] = None
 
     webhook_ip_allowlist: Optional[List[WebhookIpAllowlistEntry]] = None
     daily_loss_limit_inr: Optional[float] = Field(None, gt=0)

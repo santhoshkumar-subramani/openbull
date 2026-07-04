@@ -260,7 +260,7 @@ def _state_from_db_and_checkpoint(
             "current_side": cp_leg.get("current_side") if status == "open" else None,
         }
 
-    return {
+    state = {
         "run_id": run.id,
         "strategy_id": strategy.id,
         "pnl_realized": float(checkpoint.pnl_realized) if checkpoint else 0.0,
@@ -273,6 +273,12 @@ def _state_from_db_and_checkpoint(
         "trail_to_entry_active": bool(checkpoint.trail_to_entry_active) if checkpoint else False,
         "legs": legs,
     }
+    
+    # If it's a condition-driven strategy and no entries have been placed, it's still monitoring.
+    if strategy.strategy_kind == "condition" and not entry_by_leg:
+        state["condition_monitoring"] = True
+    
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +318,16 @@ async def _recover_run(db: AsyncSession, run: SmStrategyRun) -> None:
         exch = leg.get("exchange")
         if sym and exch:
             open_leg_symbols.append((exch, sym))
+    if state.get("condition_monitoring"):
+        if strategy.underlying and strategy.underlying_exchange:
+            exch = strategy.underlying_exchange
+            if exch == "NSE_INDEX": exch = "NSE"
+            elif exch == "BSE_INDEX": exch = "BSE"
+            open_leg_symbols.append((exch, strategy.underlying))
+        vix_cfg = strategy.vix_condition or {}
+        if vix_cfg:
+            open_leg_symbols.append(("NSE_INDEX", "INDIAVIX"))
+
     if open_leg_symbols:
         try:
             tick_feed.add_run_subscriptions(run.id, open_leg_symbols)
