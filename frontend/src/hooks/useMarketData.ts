@@ -244,6 +244,17 @@ export function useMarketData({
       const ws = wsRef.current;
       if (ws) {
         try {
+          // Best-effort unsubscribe before closing. Disconnect cleanup on the
+          // proxy also handles orphaned tokens, but sending this reduces the
+          // window where broker feeds keep stale symbols after route changes.
+          const current = subscribedRef.current;
+          if (ws.readyState === WebSocket.OPEN && current.size > 0) {
+            const toRemove = [...current].map((k) => {
+              const idx = k.indexOf(":");
+              return { exchange: k.slice(0, idx), symbol: k.slice(idx + 1) };
+            });
+            ws.send(JSON.stringify({ action: "unsubscribe", symbols: toRemove, mode: wireMode }));
+          }
           ws.close();
         } catch {
           /* ignore */

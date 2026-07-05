@@ -383,15 +383,54 @@ async def _handle_client(ws: websockets.WebSocketServerProtocol) -> None:
     except websockets.ConnectionClosed:
         pass
     finally:
-        # Cleanup client subscriptions and auth state
+        # Cleanup client subscriptions and auth state.
+        #
+        # IMPORTANT: on socket close (tab close / route change / network drop),
+        # we must unsubscribe orphan symbols from the broker feed; otherwise the
+        # adapter keeps streaming tokens no active client needs.
         _clients.pop(client_id, None)
-        _authenticated_clients.discard(client_id)
+
+        orphan_by_mode: dict[int, list[dict[str, str]]] = {}
         for key in list(_subscription_index.keys()):
+            sym, exch, mode = key
             subs = _subscription_index.get(key)
-            if subs:
-                subs.discard(client_id)
-                if not subs:
-                    del _subscription_index[key]
+            if not subs:
+                continue
+            subs.discard(client_id)
+            if not subs:
+                del _subscription_index[key]
+                orphan_by_mode.setdefault(mode, []).append({"symbol": sym, "exchange": exch})
+
+        # Best-effort broker unsubscribe for symbols that became orphaned by
+        # this disconnect. Keep this before auth-state removal so the adapter
+        # can still be used for cleanup from authenticated clients.
+        if _adapter is not None and client_id in _authenticated_clients:
+            loop = asyncio.get_running_loop()
+            total_unsubscribed = 0
+            for mode, symbols_to_unsub in orphan_by_mode.items():
+                if not symbols_to_unsub:
+                    continue
+                try:
+                    await loop.run_in_executor(None, _adapter.unsubscribe, symbols_to_unsub, mode)
+                    count = len(symbols_to_unsub)
+                    total_unsubscribed += count
+                    logger.info(
+                        "Disconnect cleanup unsubscribed %d symbols in mode=%s for client %s",
+                        count,
+                        MODE_NAME.get(mode, mode),
+                        client_id[:8],
+                    )
+                except Exception as e:
+                    logger.error("Disconnect cleanup unsubscribe error (mode=%s): %s", MODE_NAME.get(mode, mode), e)
+
+            if total_unsubscribed:
+                logger.info(
+                    "Disconnect cleanup unsubscribed total=%d symbols for client %s",
+                    total_unsubscribed,
+                    client_id[:8],
+                )
+
+        _authenticated_clients.discard(client_id)
         logger.info("Client %s disconnected (%d remaining)", client_id[:8], len(_clients))
 
 
