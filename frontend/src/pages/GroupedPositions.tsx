@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CirclePlus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
@@ -10,6 +10,8 @@ import {
   deletePositionGroup,
   assignPositionToGroup,
   unassignPosition,
+  updatePositionGroupRisk,
+  closePositionGroupNow,
   type PositionGroup,
 } from "@/api/positionGroups";
 import { Badge } from "@/components/ui/badge";
@@ -175,6 +177,19 @@ export default function GroupedPositions() {
 
   // Folded state for tables
   const [foldedState, setFoldedState] = useState<Record<string, boolean>>({});
+  const [riskDrafts, setRiskDrafts] = useState<
+    Record<
+      number,
+      {
+        stopLossEnabled: boolean;
+        stopLossMtm: string;
+        profitEnabled: boolean;
+        profitMtm: string;
+      }
+    >
+  >({});
+  const [savingRiskGroupId, setSavingRiskGroupId] = useState<number | null>(null);
+  const [closingNowGroupId, setClosingNowGroupId] = useState<number | null>(null);
 
   const toggleFold = (key: string) => {
     setFoldedState((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -202,7 +217,30 @@ export default function GroupedPositions() {
   const { data: groups, isLoading: isGroupsLoading } = useQuery({
     queryKey: ["positionGroups"],
     queryFn: getPositionGroups,
+    refetchInterval: 3000,
   });
+
+  useEffect(() => {
+    if (!groups) return;
+    const next: Record<
+      number,
+      {
+        stopLossEnabled: boolean;
+        stopLossMtm: string;
+        profitEnabled: boolean;
+        profitMtm: string;
+      }
+    > = {};
+    for (const g of groups) {
+      next[g.id] = {
+        stopLossEnabled: !!g.stop_loss_enabled,
+        stopLossMtm: g.stop_loss_mtm != null ? String(g.stop_loss_mtm) : "",
+        profitEnabled: !!g.profit_target_enabled,
+        profitMtm: g.profit_target_mtm != null ? String(g.profit_target_mtm) : "",
+      };
+    }
+    setRiskDrafts(next);
+  }, [groups]);
 
   const openPositions = useMemo(
     () => (positions ?? []).filter(isCloseable),
@@ -268,6 +306,58 @@ export default function GroupedPositions() {
     },
   });
 
+  const updateRiskMutation = useMutation({
+    mutationFn: ({
+      groupId,
+      stopLossEnabled,
+      stopLossMtm,
+      profitEnabled,
+      profitMtm,
+    }: {
+      groupId: number;
+      stopLossEnabled: boolean;
+      stopLossMtm: string;
+      profitEnabled: boolean;
+      profitMtm: string;
+    }) =>
+      updatePositionGroupRisk(groupId, {
+        stop_loss_enabled: stopLossEnabled,
+        stop_loss_mtm: stopLossEnabled ? Number(stopLossMtm) : null,
+        profit_target_enabled: profitEnabled,
+        profit_target_mtm: profitEnabled ? Number(profitMtm) : null,
+      }),
+    onMutate: ({ groupId }) => {
+      setSavingRiskGroupId(groupId);
+    },
+    onSuccess: () => {
+      toast.success("Risk settings saved");
+      queryClient.invalidateQueries({ queryKey: ["positionGroups"] });
+    },
+    onError: (err: any) => {
+      toast.error(formatError(err));
+    },
+    onSettled: () => {
+      setSavingRiskGroupId(null);
+    },
+  });
+
+  const closeNowMutation = useMutation({
+    mutationFn: (groupId: number) => closePositionGroupNow(groupId),
+    onMutate: (groupId) => {
+      setClosingNowGroupId(groupId);
+    },
+    onSuccess: () => {
+      toast.success("Manual close requested");
+      queryClient.invalidateQueries({ queryKey: ["positionGroups"] });
+    },
+    onError: (err: any) => {
+      toast.error(formatError(err));
+    },
+    onSettled: () => {
+      setClosingNowGroupId(null);
+    },
+  });
+
   // Derived state
   const mappingMap = useMemo(() => {
     // Map: symbol-exchange-product -> group name
@@ -283,6 +373,70 @@ export default function GroupedPositions() {
   }, [groups]);
 
   const masterPnl = livePositions.reduce((acc, pos) => acc + pos.pnl, 0);
+
+  const updateRiskDraft = (
+    groupId: number,
+    patch: Partial<{
+      stopLossEnabled: boolean;
+      stopLossMtm: string;
+      profitEnabled: boolean;
+      profitMtm: string;
+    }>,
+  ) => {
+    setRiskDrafts((prev) => ({
+      ...prev,
+      [groupId]: {
+        ...(prev[groupId] ?? {
+          stopLossEnabled: false,
+          stopLossMtm: "",
+          profitEnabled: false,
+          profitMtm: "",
+        }),
+        ...patch,
+      },
+    }));
+  };
+
+  const parsePositiveThreshold = (raw: string, label: string): number | null => {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+      toast.error(`${label} must be greater than 0`);
+      return null;
+    }
+    return value;
+  };
+
+  const submitRiskSettings = (groupId: number) => {
+    const draft = riskDrafts[groupId];
+    if (!draft) return;
+
+    let slValue: number | null = null;
+    let targetValue: number | null = null;
+    if (draft.stopLossEnabled) {
+      slValue = parsePositiveThreshold(draft.stopLossMtm, "Stop Loss");
+      if (slValue == null) return;
+    }
+    if (draft.profitEnabled) {
+      targetValue = parsePositiveThreshold(draft.profitMtm, "Profit Booking");
+      if (targetValue == null) return;
+    }
+
+    updateRiskMutation.mutate({
+      groupId,
+      stopLossEnabled: draft.stopLossEnabled,
+      stopLossMtm: slValue != null ? String(slValue) : "",
+      profitEnabled: draft.profitEnabled,
+      profitMtm: targetValue != null ? String(targetValue) : "",
+    });
+  };
+
+  const riskStatusTone = (status: string) => {
+    if (status === "closing" || status === "triggered") return "destructive" as const;
+    if (status === "failed") return "destructive" as const;
+    if (status === "monitoring") return "outline" as const;
+    if (status === "succeeded") return "secondary" as const;
+    return "outline" as const;
+  };
 
   if (isPositionsLoading || isGroupsLoading) {
     return (
@@ -465,6 +619,14 @@ export default function GroupedPositions() {
         );
 
         if (groupPositions.length === 0) {
+          const draft =
+            riskDrafts[group.id] ??
+            {
+              stopLossEnabled: false,
+              stopLossMtm: "",
+              profitEnabled: false,
+              profitMtm: "",
+            };
            return (
             <Card key={group.id}>
               <CardHeader 
@@ -495,6 +657,83 @@ export default function GroupedPositions() {
               </CardHeader>
               {!foldedState[group.id.toString()] && (
                 <CardContent>
+                  <div className="mb-4 rounded-md border p-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium">Auto Risk Controls</p>
+                      <Badge variant={riskStatusTone(group.risk_status)}>
+                        {group.risk_status}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={draft.stopLossEnabled}
+                          onChange={(e) =>
+                            updateRiskDraft(group.id, { stopLossEnabled: e.target.checked })
+                          }
+                        />
+                        Stop Loss (INR)
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        step={1}
+                        placeholder="e.g. 6500"
+                        value={draft.stopLossMtm}
+                        disabled={!draft.stopLossEnabled}
+                        onChange={(e) =>
+                          updateRiskDraft(group.id, { stopLossMtm: e.target.value })
+                        }
+                      />
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={draft.profitEnabled}
+                          onChange={(e) =>
+                            updateRiskDraft(group.id, { profitEnabled: e.target.checked })
+                          }
+                        />
+                        Profit Booking (INR)
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        step={1}
+                        placeholder="e.g. 5000"
+                        value={draft.profitMtm}
+                        disabled={!draft.profitEnabled}
+                        onChange={(e) =>
+                          updateRiskDraft(group.id, { profitMtm: e.target.value })
+                        }
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Stop loss value is positive input. Trigger happens when group P&amp;L is less than or equal to negative of this amount.
+                    </p>
+                    {group.risk_last_error ? (
+                      <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+                        {group.risk_last_error}
+                      </p>
+                    ) : null}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => submitRiskSettings(group.id)}
+                        disabled={savingRiskGroupId === group.id}
+                      >
+                        {savingRiskGroupId === group.id ? "Saving..." : "Save Risk Settings"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => closeNowMutation.mutate(group.id)}
+                        disabled={closingNowGroupId === group.id}
+                      >
+                        {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
+                      </Button>
+                    </div>
+                  </div>
                   <p className="py-4 text-center text-sm text-muted-foreground">
                     No open positions in this group.
                   </p>
@@ -505,6 +744,14 @@ export default function GroupedPositions() {
         }
 
         const groupPnl = groupPositions.reduce((acc, pos) => acc + pos.pnl, 0);
+        const draft =
+          riskDrafts[group.id] ??
+          {
+            stopLossEnabled: false,
+            stopLossMtm: "",
+            profitEnabled: false,
+            profitMtm: "",
+          };
 
         return (
           <Card key={group.id}>
@@ -516,6 +763,7 @@ export default function GroupedPositions() {
                 <CardTitle className="flex items-center gap-2">
                   {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
                   {group.name}
+                  <Badge variant={riskStatusTone(group.risk_status)}>{group.risk_status}</Badge>
                   <Button 
                     variant="ghost" 
                     size="sm" 
@@ -539,6 +787,81 @@ export default function GroupedPositions() {
             </CardHeader>
             {!foldedState[group.id.toString()] && (
               <CardContent>
+                <div className="mb-4 rounded-md border p-3">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">Auto Risk Controls</p>
+                    <p className="text-xs text-muted-foreground">
+                      Retry: {group.risk_retry_count} / 20
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={draft.stopLossEnabled}
+                        onChange={(e) =>
+                          updateRiskDraft(group.id, { stopLossEnabled: e.target.checked })
+                        }
+                      />
+                      Stop Loss (INR)
+                    </label>
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="e.g. 6500"
+                      value={draft.stopLossMtm}
+                      disabled={!draft.stopLossEnabled}
+                      onChange={(e) =>
+                        updateRiskDraft(group.id, { stopLossMtm: e.target.value })
+                      }
+                    />
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={draft.profitEnabled}
+                        onChange={(e) =>
+                          updateRiskDraft(group.id, { profitEnabled: e.target.checked })
+                        }
+                      />
+                      Profit Booking (INR)
+                    </label>
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="e.g. 5000"
+                      value={draft.profitMtm}
+                      disabled={!draft.profitEnabled}
+                      onChange={(e) =>
+                        updateRiskDraft(group.id, { profitMtm: e.target.value })
+                      }
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Stop loss value is positive input. Trigger happens when group P&amp;L is less than or equal to negative of this amount.
+                  </p>
+                  {group.risk_last_error ? (
+                    <p className="mt-2 text-xs text-red-600 dark:text-red-400">{group.risk_last_error}</p>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => submitRiskSettings(group.id)}
+                      disabled={savingRiskGroupId === group.id}
+                    >
+                      {savingRiskGroupId === group.id ? "Saving..." : "Save Risk Settings"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => closeNowMutation.mutate(group.id)}
+                      disabled={closingNowGroupId === group.id}
+                    >
+                      {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
+                    </Button>
+                  </div>
+                </div>
                 <Table>
                 <TableHeader>
                   <TableRow>
