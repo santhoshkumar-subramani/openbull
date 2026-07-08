@@ -11,7 +11,10 @@ from backend.dependencies import get_db, get_current_user
 from backend.models.position_groups import PositionGroup, PositionGroupMapping
 from backend.schemas.position_groups import (
     PositionGroupCreate,
+    PositionGroupUpdate,
     PositionGroupOut,
+    PositionGroupRiskState,
+    PositionGroupRiskUpdate,
     PositionGroupMappingCreate,
     PositionGroupMappingOut,
 )
@@ -73,6 +76,32 @@ async def delete_position_group(
     await db.delete(group)
     await db.commit()
     return None
+
+
+@router.patch("/{group_id}", response_model=PositionGroupOut)
+async def update_position_group(
+    group_id: int,
+    group_in: PositionGroupUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update a position group."""
+    result = await db.execute(
+        select(PositionGroup)
+        .options(selectinload(PositionGroup.mappings))
+        .where(
+            PositionGroup.id == group_id, PositionGroup.user_id == current_user.id
+        )
+    )
+    group = result.scalar_one_or_none()
+    
+    if not group:
+        raise HTTPException(status_code=404, detail="Position group not found")
+
+    group.name = group_in.name
+    await db.commit()
+    await db.refresh(group)
+    return group
 
 
 @router.post("/{group_id}/positions", response_model=PositionGroupMappingOut)
@@ -146,3 +175,69 @@ async def unassign_position(
         await db.delete(mapping)
         await db.commit()
     return None
+
+
+@router.patch("/{group_id}/risk", response_model=PositionGroupRiskState)
+async def update_position_group_risk(
+    group_id: int,
+    payload: PositionGroupRiskUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update optional stop-loss / profit-booking settings for one group."""
+    result = await db.execute(
+        select(PositionGroup).where(
+            PositionGroup.id == group_id,
+            PositionGroup.user_id == current_user.id,
+        )
+    )
+    group = result.scalar_one_or_none()
+    if not group:
+        raise HTTPException(status_code=404, detail="Position group not found")
+
+    group.stop_loss_enabled = bool(payload.stop_loss_enabled)
+    group.stop_loss_mtm = payload.stop_loss_mtm if payload.stop_loss_enabled else None
+    group.profit_target_enabled = bool(payload.profit_target_enabled)
+    group.profit_target_mtm = payload.profit_target_mtm if payload.profit_target_enabled else None
+
+    # Reset stale failure state whenever user saves risk settings.
+    if group.risk_status in {"failed", "succeeded"}:
+        group.risk_status = "idle"
+    group.risk_last_error = None
+    group.risk_retry_count = 0
+    group.risk_pending_symbols = []
+    group.risk_force_close_requested = False
+
+    await db.commit()
+    await db.refresh(group)
+    return PositionGroupRiskState.model_validate(group)
+
+
+@router.post("/{group_id}/close-now", response_model=PositionGroupRiskState)
+async def close_group_now(
+    group_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Request immediate high-priority close for this group's mapped positions."""
+    result = await db.execute(
+        select(PositionGroup).where(
+            PositionGroup.id == group_id,
+            PositionGroup.user_id == current_user.id,
+        )
+    )
+    group = result.scalar_one_or_none()
+    if not group:
+        raise HTTPException(status_code=404, detail="Position group not found")
+
+    group.risk_force_close_requested = True
+    if group.risk_status in {"idle", "monitoring", "failed", "succeeded"}:
+        group.risk_status = "triggered"
+    group.risk_last_trigger_reason = "manual"
+    group.risk_last_error = None
+    group.risk_retry_count = 0
+    group.risk_pending_symbols = []
+
+    await db.commit()
+    await db.refresh(group)
+    return PositionGroupRiskState.model_validate(group)

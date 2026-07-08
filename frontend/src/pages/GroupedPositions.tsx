@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CirclePlus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { CirclePlus, Trash2, ChevronDown, ChevronRight, Edit2, TrendingDown, TrendingUp, ShieldCheck, ShieldAlert } from "lucide-react";
 
 import { getPositions } from "@/api/dashboard";
 import {
@@ -12,6 +12,7 @@ import {
   unassignPosition,
   updatePositionGroupRisk,
   closePositionGroupNow,
+  renamePositionGroup,
   type PositionGroup,
 } from "@/api/positionGroups";
 import { Badge } from "@/components/ui/badge";
@@ -191,6 +192,10 @@ export default function GroupedPositions() {
   const [savingRiskGroupId, setSavingRiskGroupId] = useState<number | null>(null);
   const [closingNowGroupId, setClosingNowGroupId] = useState<number | null>(null);
 
+  const [editRiskGroupId, setEditRiskGroupId] = useState<number | null>(null);
+  const [groupToRename, setGroupToRename] = useState<PositionGroup | null>(null);
+  const [renameGroupName, setRenameGroupName] = useState("");
+
   const toggleFold = (key: string) => {
     setFoldedState((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -265,6 +270,19 @@ export default function GroupedPositions() {
     },
   });
 
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ groupId, name }: { groupId: number; name: string }) =>
+      renamePositionGroup(groupId, name),
+    onSuccess: () => {
+      toast.success("Group renamed");
+      queryClient.invalidateQueries({ queryKey: ["positionGroups"] });
+      setGroupToRename(null);
+    },
+    onError: (err: any) => {
+      toast.error(formatError(err));
+    },
+  });
+
   const deleteGroupMutation = useMutation({
     mutationFn: deletePositionGroup,
     onSuccess: () => {
@@ -332,6 +350,7 @@ export default function GroupedPositions() {
     onSuccess: () => {
       toast.success("Risk settings saved");
       queryClient.invalidateQueries({ queryKey: ["positionGroups"] });
+      setEditRiskGroupId(null);
     },
     onError: (err: any) => {
       toast.error(formatError(err));
@@ -619,14 +638,6 @@ export default function GroupedPositions() {
         );
 
         if (groupPositions.length === 0) {
-          const draft =
-            riskDrafts[group.id] ??
-            {
-              stopLossEnabled: false,
-              stopLossMtm: "",
-              profitEnabled: false,
-              profitMtm: "",
-            };
            return (
             <Card key={group.id}>
               <CardHeader 
@@ -637,6 +648,16 @@ export default function GroupedPositions() {
                   <CardTitle className="flex items-center gap-2">
                     {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
                     {group.name}
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={(e) => { e.stopPropagation(); setGroupToRename(group); setRenameGroupName(group.name); }} 
+                      className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-500 dark:hover:bg-blue-950/50 ml-2"
+                      title="Rename Group"
+                    >
+                      <span className="sr-only">Rename Group</span>
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
                     <Button 
                       variant="ghost" 
                       size="sm" 
@@ -657,82 +678,68 @@ export default function GroupedPositions() {
               </CardHeader>
               {!foldedState[group.id.toString()] && (
                 <CardContent>
-                  <div className="mb-4 rounded-md border p-3">
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium">Auto Risk Controls</p>
-                      <Badge variant={riskStatusTone(group.risk_status)}>
-                        {group.risk_status}
-                      </Badge>
+                  <div className="mb-4 rounded-md border p-4 bg-card/50">
+                    <div className="mb-4 flex items-center justify-between gap-2 border-b pb-3">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-5 w-5 text-primary" />
+                        <h3 className="font-semibold text-sm">Auto Risk Controls</h3>
+                        <Badge variant={riskStatusTone(group.risk_status)}>{group.risk_status}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setEditRiskGroupId(group.id); }}>
+                          <Edit2 className="h-4 w-4 mr-2" />
+                          Modify
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => closeNowMutation.mutate(group.id)}
+                          disabled={closingNowGroupId === group.id}
+                        >
+                          {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={draft.stopLossEnabled}
-                          onChange={(e) =>
-                            updateRiskDraft(group.id, { stopLossEnabled: e.target.checked })
-                          }
-                        />
-                        Stop Loss (INR)
-                      </label>
-                      <Input
-                        type="number"
-                        min={1}
-                        step={1}
-                        placeholder="e.g. 6500"
-                        value={draft.stopLossMtm}
-                        disabled={!draft.stopLossEnabled}
-                        onChange={(e) =>
-                          updateRiskDraft(group.id, { stopLossMtm: e.target.value })
-                        }
-                      />
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={draft.profitEnabled}
-                          onChange={(e) =>
-                            updateRiskDraft(group.id, { profitEnabled: e.target.checked })
-                          }
-                        />
-                        Profit Booking (INR)
-                      </label>
-                      <Input
-                        type="number"
-                        min={1}
-                        step={1}
-                        placeholder="e.g. 5000"
-                        value={draft.profitMtm}
-                        disabled={!draft.profitEnabled}
-                        onChange={(e) =>
-                          updateRiskDraft(group.id, { profitMtm: e.target.value })
-                        }
-                      />
+                    
+                    <div className="grid gap-6 sm:grid-cols-2">
+                      <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.stop_loss_enabled ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-muted text-muted-foreground'}`}>
+                          <TrendingDown className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground font-medium">Stop Loss</p>
+                          <p className="text-sm font-semibold">
+                            {group.stop_loss_enabled && group.stop_loss_mtm != null ? `₹${group.stop_loss_mtm}` : "Disabled"}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.profit_target_enabled ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-muted text-muted-foreground'}`}>
+                          <TrendingUp className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground font-medium">Profit Target</p>
+                          <p className="text-sm font-semibold">
+                            {group.profit_target_enabled && group.profit_target_mtm != null ? `₹${group.profit_target_mtm}` : "Disabled"}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Stop loss value is positive input. Trigger happens when group P&amp;L is less than or equal to negative of this amount.
-                    </p>
+                    
                     {group.risk_last_error ? (
-                      <p className="mt-2 text-xs text-red-600 dark:text-red-400">
-                        {group.risk_last_error}
-                      </p>
+                      <div className="mt-4 flex items-start gap-2 text-sm text-red-600 dark:text-red-400 rounded-md bg-red-50 dark:bg-red-950/20 p-2.5">
+                        <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+                        <div className="flex-1">
+                          <p className="font-medium">Trigger Failed</p>
+                          <p className="text-xs opacity-90">{group.risk_last_error} (Retry: {group.risk_retry_count}/20)</p>
+                        </div>
+                      </div>
+                    ) : group.risk_retry_count > 0 ? (
+                      <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Retry attempts: {group.risk_retry_count} / 20</span>
+                      </div>
                     ) : null}
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => submitRiskSettings(group.id)}
-                        disabled={savingRiskGroupId === group.id}
-                      >
-                        {savingRiskGroupId === group.id ? "Saving..." : "Save Risk Settings"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => closeNowMutation.mutate(group.id)}
-                        disabled={closingNowGroupId === group.id}
-                      >
-                        {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
-                      </Button>
-                    </div>
                   </div>
                   <p className="py-4 text-center text-sm text-muted-foreground">
                     No open positions in this group.
@@ -744,14 +751,6 @@ export default function GroupedPositions() {
         }
 
         const groupPnl = groupPositions.reduce((acc, pos) => acc + pos.pnl, 0);
-        const draft =
-          riskDrafts[group.id] ??
-          {
-            stopLossEnabled: false,
-            stopLossMtm: "",
-            profitEnabled: false,
-            profitMtm: "",
-          };
 
         return (
           <Card key={group.id}>
@@ -764,6 +763,16 @@ export default function GroupedPositions() {
                   {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
                   {group.name}
                   <Badge variant={riskStatusTone(group.risk_status)}>{group.risk_status}</Badge>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={(e) => { e.stopPropagation(); setGroupToRename(group); setRenameGroupName(group.name); }} 
+                    className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-500 dark:hover:bg-blue-950/50 ml-2"
+                    title="Rename Group"
+                  >
+                    <span className="sr-only">Rename Group</span>
+                    <Edit2 className="h-4 w-4" />
+                  </Button>
                   <Button 
                     variant="ghost" 
                     size="sm" 
@@ -787,80 +796,68 @@ export default function GroupedPositions() {
             </CardHeader>
             {!foldedState[group.id.toString()] && (
               <CardContent>
-                <div className="mb-4 rounded-md border p-3">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-medium">Auto Risk Controls</p>
-                    <p className="text-xs text-muted-foreground">
-                      Retry: {group.risk_retry_count} / 20
-                    </p>
+                <div className="mb-4 rounded-md border p-4 bg-card/50">
+                  <div className="mb-4 flex items-center justify-between gap-2 border-b pb-3">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 text-primary" />
+                      <h3 className="font-semibold text-sm">Auto Risk Controls</h3>
+                      <Badge variant={riskStatusTone(group.risk_status)}>{group.risk_status}</Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setEditRiskGroupId(group.id); }}>
+                        <Edit2 className="h-4 w-4 mr-2" />
+                        Modify
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => closeNowMutation.mutate(group.id)}
+                        disabled={closingNowGroupId === group.id}
+                      >
+                        {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={draft.stopLossEnabled}
-                        onChange={(e) =>
-                          updateRiskDraft(group.id, { stopLossEnabled: e.target.checked })
-                        }
-                      />
-                      Stop Loss (INR)
-                    </label>
-                    <Input
-                      type="number"
-                      min={1}
-                      step={1}
-                      placeholder="e.g. 6500"
-                      value={draft.stopLossMtm}
-                      disabled={!draft.stopLossEnabled}
-                      onChange={(e) =>
-                        updateRiskDraft(group.id, { stopLossMtm: e.target.value })
-                      }
-                    />
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={draft.profitEnabled}
-                        onChange={(e) =>
-                          updateRiskDraft(group.id, { profitEnabled: e.target.checked })
-                        }
-                      />
-                      Profit Booking (INR)
-                    </label>
-                    <Input
-                      type="number"
-                      min={1}
-                      step={1}
-                      placeholder="e.g. 5000"
-                      value={draft.profitMtm}
-                      disabled={!draft.profitEnabled}
-                      onChange={(e) =>
-                        updateRiskDraft(group.id, { profitMtm: e.target.value })
-                      }
-                    />
+                  
+                  <div className="grid gap-6 sm:grid-cols-2">
+                    <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.stop_loss_enabled ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-muted text-muted-foreground'}`}>
+                        <TrendingDown className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium">Stop Loss</p>
+                        <p className="text-sm font-semibold">
+                          {group.stop_loss_enabled && group.stop_loss_mtm != null ? `₹${group.stop_loss_mtm}` : "Disabled"}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.profit_target_enabled ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-muted text-muted-foreground'}`}>
+                        <TrendingUp className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium">Profit Target</p>
+                        <p className="text-sm font-semibold">
+                          {group.profit_target_enabled && group.profit_target_mtm != null ? `₹${group.profit_target_mtm}` : "Disabled"}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Stop loss value is positive input. Trigger happens when group P&amp;L is less than or equal to negative of this amount.
-                  </p>
+                  
                   {group.risk_last_error ? (
-                    <p className="mt-2 text-xs text-red-600 dark:text-red-400">{group.risk_last_error}</p>
+                    <div className="mt-4 flex items-start gap-2 text-sm text-red-600 dark:text-red-400 rounded-md bg-red-50 dark:bg-red-950/20 p-2.5">
+                      <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="font-medium">Trigger Failed</p>
+                        <p className="text-xs opacity-90">{group.risk_last_error} (Retry: {group.risk_retry_count}/20)</p>
+                      </div>
+                    </div>
+                  ) : group.risk_retry_count > 0 ? (
+                    <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Retry attempts: {group.risk_retry_count} / 20</span>
+                    </div>
                   ) : null}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => submitRiskSettings(group.id)}
-                      disabled={savingRiskGroupId === group.id}
-                    >
-                      {savingRiskGroupId === group.id ? "Saving..." : "Save Risk Settings"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => closeNowMutation.mutate(group.id)}
-                      disabled={closingNowGroupId === group.id}
-                    >
-                      {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
-                    </Button>
-                  </div>
                 </div>
                 <Table>
                 <TableHeader>
@@ -975,6 +972,138 @@ export default function GroupedPositions() {
           }
         }}
       />
+
+      {/* Rename Group Dialog */}
+      <Dialog open={groupToRename !== null} onOpenChange={(o) => { if (!o) setGroupToRename(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Strategy Group</DialogTitle>
+            <DialogDescription>
+              Enter a new name for the strategy group.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (groupToRename && renameGroupName.trim()) {
+              renameGroupMutation.mutate({ groupId: groupToRename.id, name: renameGroupName.trim() });
+            }
+          }}>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="rename" className="text-right">
+                  Name
+                </Label>
+                <Input
+                  id="rename"
+                  value={renameGroupName}
+                  onChange={(e) => setRenameGroupName(e.target.value)}
+                  className="col-span-3"
+                  placeholder="e.g., Bull Call Spread Nifty"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setGroupToRename(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={renameGroupMutation.isPending || !renameGroupName.trim()}>
+                {renameGroupMutation.isPending ? "Renaming..." : "Rename Group"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Risk Controls Dialog */}
+      <Dialog open={editRiskGroupId !== null} onOpenChange={(o) => !o && setEditRiskGroupId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Auto Risk Controls</DialogTitle>
+            <DialogDescription>
+              Configure stop loss and profit booking for this strategy group.
+            </DialogDescription>
+          </DialogHeader>
+          {editRiskGroupId !== null && (
+            <div className="py-4">
+              <div className="grid gap-4">
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={riskDrafts[editRiskGroupId]?.stopLossEnabled || false}
+                      onChange={(e) =>
+                        updateRiskDraft(editRiskGroupId, { stopLossEnabled: e.target.checked })
+                      }
+                      className="rounded border-gray-300"
+                    />
+                    Enable Stop Loss
+                  </label>
+                  <div className="pl-6">
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="e.g. 6500 (INR)"
+                      value={riskDrafts[editRiskGroupId]?.stopLossMtm || ""}
+                      disabled={!riskDrafts[editRiskGroupId]?.stopLossEnabled}
+                      onChange={(e) =>
+                        updateRiskDraft(editRiskGroupId, { stopLossMtm: e.target.value })
+                      }
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Value is positive. Triggers when group P&amp;L &le; -{riskDrafts[editRiskGroupId]?.stopLossMtm || '0'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={riskDrafts[editRiskGroupId]?.profitEnabled || false}
+                      onChange={(e) =>
+                        updateRiskDraft(editRiskGroupId, { profitEnabled: e.target.checked })
+                      }
+                      className="rounded border-gray-300"
+                    />
+                    Enable Profit Booking
+                  </label>
+                  <div className="pl-6">
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="e.g. 5000 (INR)"
+                      value={riskDrafts[editRiskGroupId]?.profitMtm || ""}
+                      disabled={!riskDrafts[editRiskGroupId]?.profitEnabled}
+                      onChange={(e) =>
+                        updateRiskDraft(editRiskGroupId, { profitMtm: e.target.value })
+                      }
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Value is positive. Triggers when group P&amp;L &ge; {riskDrafts[editRiskGroupId]?.profitMtm || '0'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditRiskGroupId(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (editRiskGroupId !== null) submitRiskSettings(editRiskGroupId);
+              }}
+              disabled={editRiskGroupId !== null && savingRiskGroupId === editRiskGroupId}
+            >
+              {editRiskGroupId !== null && savingRiskGroupId === editRiskGroupId ? "Saving..." : "Save Risk Settings"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
