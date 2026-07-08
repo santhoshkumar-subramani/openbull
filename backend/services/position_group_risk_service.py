@@ -195,6 +195,7 @@ async def _process_user_groups(
         needs_sync = True
 
     if needs_sync:
+        logger.info(f"Performing REST position sync for user {user_id} (last_sync: {now - last_sync:.1f}s ago)")
         ok, payload, _status = await run_in_threadpool(
             get_positions_with_auth,
             auth_token,
@@ -229,6 +230,8 @@ async def _process_user_groups(
 
     position_map = _cached_positions.get(user_id, {})
     ws_healthy = is_data_fresh(max_age_seconds=5.0)
+    if not ws_healthy:
+        logger.warning(f"WebSocket data is stale/unhealthy for user {user_id}. Falling back to REST P&L.")
 
     for group in groups:
         await _process_group(db, group, user_id, auth_token, broker, config, position_map, ws_healthy)
@@ -257,7 +260,9 @@ def _calculate_live_pnl(pos: dict[str, Any], symbol: str, exchange: str, ws_heal
     else:
         unrealized = (avg_price - ltp) * abs(qty) * lot_size
         
-    return realized_pnl + unrealized
+    live_pnl = realized_pnl + unrealized
+    logger.debug(f"Live PnL for {symbol}: {live_pnl:.2f} (LTP: {ltp}, Avg: {avg_price}, Qty: {qty}, Realized: {realized_pnl})")
+    return live_pnl
 
 
 async def _process_group(
