@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from backend.database import Base
@@ -27,6 +31,22 @@ class PositionGroup(Base):
         index=True,
     )
     name = Column(String(200), nullable=False)
+
+    # Optional group-level auto risk controls.
+    stop_loss_enabled = Column(Boolean, nullable=False, server_default="false")
+    stop_loss_mtm = Column(Numeric(18, 2), nullable=True)
+    profit_target_enabled = Column(Boolean, nullable=False, server_default="false")
+    profit_target_mtm = Column(Numeric(18, 2), nullable=True)
+
+    # Runtime state for the group risk monitor.
+    risk_status = Column(String(30), nullable=False, server_default="idle")
+    risk_last_mtm = Column(Numeric(18, 2), nullable=True)
+    risk_last_trigger_reason = Column(String(40), nullable=True)
+    risk_last_triggered_at = Column(DateTime(timezone=True), nullable=True)
+    risk_last_error = Column(Text, nullable=True)
+    risk_retry_count = Column(Integer, nullable=False, server_default="0")
+    risk_pending_symbols = Column(JSONB, nullable=True)
+    risk_force_close_requested = Column(Boolean, nullable=False, server_default="false")
 
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

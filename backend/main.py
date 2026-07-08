@@ -108,6 +108,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Strategy engine startup failed")
 
+    # Grouped positions risk monitor: optional group-level SL/target auto-close.
+    try:
+        from backend.services import position_group_risk_service
+
+        position_group_risk_service.start()
+    except Exception:
+        logger.exception("Grouped-position risk monitor startup failed")
+
     # Load broker plugins
     plugins = load_all_plugins()
     logger.info("Loaded %d broker plugins: %s", len(plugins), list(plugins.keys()))
@@ -171,6 +179,12 @@ async def lifespan(app: FastAPI):
         await strategy_checkpoint.stop()
     except Exception:
         logger.exception("Error stopping strategy engine")
+    try:
+        from backend.services import position_group_risk_service
+
+        await position_group_risk_service.stop()
+    except Exception:
+        logger.exception("Error stopping grouped-position risk monitor")
     await engine.dispose()
     logger.info("OpenBull shut down")
     # Flush DB error sink before the process exits so in-flight queued

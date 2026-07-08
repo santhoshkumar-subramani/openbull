@@ -46,13 +46,39 @@ async def resolve_live_auth(
     Returns ``None`` when no valid session exists — engine should refuse
     the live action.
     """
+    resolved_broker = broker
+    if resolved_broker is None:
+        # Mirror request-path broker selection: prefer active broker config.
+        cfg_rows = (await db.execute(
+            select(BrokerConfig).where(
+                BrokerConfig.user_id == user_id,
+                BrokerConfig.is_active == True,  # noqa: E712
+            )
+        )).scalars().all()
+        if len(cfg_rows) == 1:
+            resolved_broker = cfg_rows[0].broker_name
+        elif len(cfg_rows) > 1:
+            logger.warning(
+                "Live auth: multiple active broker configs for user=%d; refusing ambiguous selection",
+                user_id,
+            )
+            return None
+
     stmt = select(BrokerAuth).where(
         BrokerAuth.user_id == user_id,
         BrokerAuth.is_revoked == False,  # noqa: E712
     )
-    if broker:
-        stmt = stmt.where(BrokerAuth.broker_name == broker)
-    row = (await db.execute(stmt)).scalar_one_or_none()
+    if resolved_broker:
+        stmt = stmt.where(BrokerAuth.broker_name == resolved_broker)
+
+    rows = (await db.execute(stmt)).scalars().all()
+    if resolved_broker is None and len(rows) > 1:
+        logger.warning(
+            "Live auth: multiple active broker sessions for user=%d without selected broker",
+            user_id,
+        )
+        return None
+    row = rows[0] if rows else None
     if row is None:
         return None
 

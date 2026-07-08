@@ -118,6 +118,56 @@ def run_startup_migrations() -> None:
         _add_column_if_missing(
             engine, "sm_strategy", "vix_condition", "JSONB"
         )
+
+        # Grouped-position risk controls/state.
+        _add_column_if_missing(
+            engine, "position_groups", "stop_loss_enabled",
+            "BOOLEAN NOT NULL DEFAULT FALSE",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "stop_loss_mtm",
+            "NUMERIC(18,2)",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "profit_target_enabled",
+            "BOOLEAN NOT NULL DEFAULT FALSE",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "profit_target_mtm",
+            "NUMERIC(18,2)",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_status",
+            "VARCHAR(30) NOT NULL DEFAULT 'idle'",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_last_mtm",
+            "NUMERIC(18,2)",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_last_trigger_reason",
+            "VARCHAR(40)",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_last_triggered_at",
+            "TIMESTAMP WITH TIME ZONE",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_last_error",
+            "TEXT",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_retry_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_pending_symbols",
+            "JSONB",
+        )
+        _add_column_if_missing(
+            engine, "position_groups", "risk_force_close_requested",
+            "BOOLEAN NOT NULL DEFAULT FALSE",
+        )
     except Exception:
         logger.exception("Startup schema migration failed")
     finally:
