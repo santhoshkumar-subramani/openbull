@@ -5,9 +5,54 @@ Dual-entry pattern: get_positions_with_auth() + get_positions()
 
 import importlib
 import logging
+import asyncio
+import threading
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+_position_diff_locks: dict[int, asyncio.Lock] = {}
+_position_diff_locks_guard = threading.Lock()
+
+
+def _get_position_diff_lock(user_id: int) -> asyncio.Lock:
+    with _position_diff_locks_guard:
+        lock = _position_diff_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _position_diff_locks[user_id] = lock
+        return lock
+
+
+def _position_key(position: dict[str, Any]) -> str | None:
+    """Build a stable identity key for a broker position row."""
+    symbol = position.get("symbol")
+    if not symbol:
+        return None
+
+    token = position.get("token") or position.get("instrument_token") or position.get("tsym")
+    if token:
+        return f"tok:{token}"
+
+    exchange = position.get("exchange") or position.get("exch") or "NA"
+    product = position.get("product") or position.get("prd") or "NA"
+    return f"{exchange}|{product}|{symbol}"
+
+
+async def _acquire_event_dedupe(key: str, ttl_seconds: int) -> bool:
+    """Return True only once per key/TTL window using Redis NX semantics."""
+    try:
+        from backend.utils.redis_client import KEY_PREFIX, get_redis
+
+        full_key = f"{KEY_PREFIX}{key}"
+        created = await get_redis().set(full_key, "1", ex=ttl_seconds, nx=True)
+        return bool(created)
+    except Exception:
+        # Fail open: prefer sending a notification over dropping a real event.
+        return True
 
 
 def _format_decimal(value):
@@ -118,78 +163,123 @@ async def _async_diff_positions(user_id: int, current_positions: list):
         from backend.utils.event_bus import bus
         from backend.events.position_events import PositionOpenedEvent, PositionClosedEvent
         from backend.strategy.time_utils import format_ist, now_utc
-        import math
-        
-        redis_key = f"live_positions:{user_id}"
-        old_positions = await cache_get_json(redis_key)
-        
-        # Cache the fresh snapshot for next tick (1 day TTL)
-        await cache_set_json(redis_key, current_positions, 86400)
-        
-        if old_positions is None:
-            # First fetch of the day, do not spam alerts for existing positions
-            return
-            
-        old_map = {p.get("symbol"): p for p in old_positions if p.get("symbol")}
-        new_map = {p.get("symbol"): p for p in current_positions if p.get("symbol")}
-        
-        # Check for Opened positions
-        for sym, new_p in new_map.items():
-            new_qty = float(new_p.get("quantity") or new_p.get("netqty") or new_p.get("qty") or 0)
-            if new_qty != 0:
-                old_p = old_map.get(sym)
-                old_qty = float(old_p.get("quantity") or old_p.get("netqty") or old_p.get("qty") or 0) if old_p else 0
-                
-                # Note: We can also trigger on partial adds, but let's stick to fresh opens
-                if old_qty == 0:
-                    logger.info(f"[Position Diff] Detected new open for {sym} (old_qty: {old_qty}, new_qty: {new_qty})")
-                    action = "BUY" if new_qty > 0 else "SELL"
-                    # Average entry price could be buyavg/sellavg depending on side
-                    avg_price = new_p.get("average_price") or new_p.get("buyavg") if action == "BUY" else new_p.get("sellavg")
-                    bus.publish(PositionOpenedEvent(
-                        user_id=user_id,
-                        position_data={
-                            "action": action,
-                            "symbol": sym,
-                            "quantity": abs(new_qty),
-                            "average_price": avg_price or 0.0,
-                            "execution_time": format_ist(now_utc())
-                        }
-                    ))
-                else:
-                    logger.debug(f"[Position Diff] Unchanged/partial open for {sym} (old_qty: {old_qty}, new_qty: {new_qty})")
 
-        # Check for Closed positions
-        for sym, old_p in old_map.items():
-            old_qty = float(old_p.get("quantity") or old_p.get("netqty") or old_p.get("qty") or 0)
-            if old_qty != 0:
-                new_p = new_map.get(sym)
-                new_qty = float(new_p.get("quantity") or new_p.get("netqty") or new_p.get("qty") or 0) if new_p else 0
-                
-                # If quantity drops to exactly zero
-                if new_qty == 0:
-                    logger.info(f"[Position Diff] Detected full close for {sym} (old_qty: {old_qty}, new_qty: {new_qty})")
-                    realized_pnl = 0.0
-                    # Try to fetch realized PnL from the broker's API response directly
-                    if new_p:
-                        realized_pnl = new_p.get("realized_pnl") or new_p.get("rpnl") or new_p.get("realizedprofit") or 0.0
-                    else:
-                        # Fallback: estimate from the last known MTM before it vanished
-                        realized_pnl = old_p.get("realized_pnl") or old_p.get("rpnl") or old_p.get("unrealized_pnl") or old_p.get("urmtm") or 0.0
+        lock = _get_position_diff_lock(user_id)
+        async with lock:
+            redis_key = f"live_positions:{user_id}"
+            old_positions = await cache_get_json(redis_key)
+            
+            # Cache the fresh snapshot for next tick (1 day TTL)
+            await cache_set_json(redis_key, current_positions, 86400)
+            
+            if old_positions is None:
+                # First fetch of the day, do not spam alerts for existing positions
+                return
+            
+            old_map = {}
+            for p in old_positions:
+                key = _position_key(p)
+                if key:
+                    old_map[key] = p
+
+            new_map = {}
+            for p in current_positions:
+                key = _position_key(p)
+                if key:
+                    new_map[key] = p
+
+            ist_date = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+            dedupe_ttl = 18 * 60 * 60
+            
+            # Check for Opened positions
+            for pos_key, new_p in new_map.items():
+                new_qty = float(new_p.get("quantity") or new_p.get("netqty") or new_p.get("qty") or 0)
+                if new_qty != 0:
+                    old_p = old_map.get(pos_key)
+                    old_qty = float(old_p.get("quantity") or old_p.get("netqty") or old_p.get("qty") or 0) if old_p else 0
                     
-                    exit_price = 0.0
-                    if new_p:
-                        exit_price = new_p.get("sellavg") if old_qty > 0 else new_p.get("buyavg")
+                    # Note: We can also trigger on partial adds, but let's stick to fresh opens
+                    if old_qty == 0:
+                        symbol = new_p.get("symbol") or pos_key
+                        logger.info(
+                            "[Position Diff] Detected new open for %s (old_qty: %s, new_qty: %s)",
+                            symbol,
+                            old_qty,
+                            new_qty,
+                        )
+                        action = "BUY" if new_qty > 0 else "SELL"
+                        # Average entry price could be buyavg/sellavg depending on side
+                        avg_price = (
+                            (new_p.get("average_price") or new_p.get("buyavg"))
+                            if action == "BUY"
+                            else (new_p.get("average_price") or new_p.get("sellavg"))
+                        )
+
+                        event_id = f"position-open:{user_id}:{pos_key}:{int(new_qty)}:{ist_date}"
+                        if not await _acquire_event_dedupe(event_id, dedupe_ttl):
+                            logger.debug("[Position Diff] Skipping duplicate open event %s", event_id)
+                            continue
+
+                        bus.publish(PositionOpenedEvent(
+                            user_id=user_id,
+                            position_data={
+                                "action": action,
+                                "symbol": symbol,
+                                "quantity": abs(new_qty),
+                                "average_price": avg_price or 0.0,
+                                "execution_time": format_ist(now_utc())
+                            }
+                        ))
+                    else:
+                        logger.debug(
+                            "[Position Diff] Unchanged/partial open for %s (old_qty: %s, new_qty: %s)",
+                            new_p.get("symbol") or pos_key,
+                            old_qty,
+                            new_qty,
+                        )
+
+            # Check for Closed positions
+            for pos_key, old_p in old_map.items():
+                old_qty = float(old_p.get("quantity") or old_p.get("netqty") or old_p.get("qty") or 0)
+                if old_qty != 0:
+                    new_p = new_map.get(pos_key)
+                    new_qty = float(new_p.get("quantity") or new_p.get("netqty") or new_p.get("qty") or 0) if new_p else 0
+                    
+                    # If quantity drops to exactly zero
+                    if new_qty == 0:
+                        symbol = old_p.get("symbol") or pos_key
+                        logger.info(
+                            "[Position Diff] Detected full close for %s (old_qty: %s, new_qty: %s)",
+                            symbol,
+                            old_qty,
+                            new_qty,
+                        )
+                        realized_pnl = 0.0
+                        # Try to fetch realized PnL from the broker's API response directly
+                        if new_p:
+                            realized_pnl = new_p.get("realized_pnl") or new_p.get("rpnl") or new_p.get("realizedprofit") or 0.0
+                        else:
+                            # Fallback: estimate from the last known MTM before it vanished
+                            realized_pnl = old_p.get("realized_pnl") or old_p.get("rpnl") or old_p.get("unrealized_pnl") or old_p.get("urmtm") or 0.0
                         
-                    bus.publish(PositionClosedEvent(
-                        user_id=user_id,
-                        position_data={
-                            "symbol": sym,
-                            "quantity": abs(old_qty),
-                            "average_price": exit_price or old_p.get("ltp") or 0.0,
-                            "realized_pnl": realized_pnl
-                        }
-                    ))
+                        exit_price = 0.0
+                        if new_p:
+                            exit_price = new_p.get("sellavg") if old_qty > 0 else new_p.get("buyavg")
+
+                        event_id = f"position-close:{user_id}:{pos_key}:{int(abs(old_qty))}:{ist_date}"
+                        if not await _acquire_event_dedupe(event_id, dedupe_ttl):
+                            logger.debug("[Position Diff] Skipping duplicate close event %s", event_id)
+                            continue
+                            
+                        bus.publish(PositionClosedEvent(
+                            user_id=user_id,
+                            position_data={
+                                "symbol": symbol,
+                                "quantity": abs(old_qty),
+                                "average_price": exit_price or old_p.get("ltp") or 0.0,
+                                "realized_pnl": realized_pnl
+                            }
+                        ))
     except Exception as e:
         import logging
         logging.getLogger(__name__).error("Failed to diff live positions for telegram alerts: %s", e)

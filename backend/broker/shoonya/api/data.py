@@ -146,6 +146,51 @@ def _fetch_quote_with_fallback(
     return result
 
 
+def _fetch_quote_getquotes_only(
+    payload: dict,
+    jkey: str,
+    expected_token: str,
+    symbol: str,
+    exchange: str,
+    context: str,
+    max_attempts: int = 3,
+) -> dict:
+    """Fetch quote data using only GetQuotes with token-match retries."""
+    last_result: dict = {}
+    for attempt in range(max_attempts):
+        result = _post("GetQuotes", payload, jkey)
+        last_result = result
+        if result.get("stat") != "Ok":
+            raise Exception(f"Error from Shoonya: {result.get('emsg', 'Unknown error')}")
+
+        resp_token = result.get("token")
+        if str(resp_token) == str(expected_token):
+            return result
+
+        logger.warning(
+            "Shoonya %s token mismatch (attempt %d/%d). Requested: %s, Got: %s for %s/%s. Raw quote: %s",
+            context,
+            attempt + 1,
+            max_attempts,
+            expected_token,
+            resp_token,
+            symbol,
+            exchange,
+            json.dumps(result),
+        )
+        if attempt < max_attempts - 1:
+            time.sleep(0.1)
+
+    logger.error(
+        "Shoonya %s failed to return correct token after %d attempts for %s/%s.",
+        context,
+        max_attempts,
+        symbol,
+        exchange,
+    )
+    return last_result
+
+
 # ---------- Quotes ----------
 
 def get_quotes(
@@ -173,13 +218,13 @@ def get_quotes(
 
     logger.info("SHOONYA GetQuotes REQUEST: symbol=%s, exchange=%s -> Sending payload: %s", symbol, exchange, payload)
 
-    result = _fetch_quote_with_fallback(
+    result = _fetch_quote_getquotes_only(
         payload=payload,
         jkey=jkey,
         expected_token=str(token),
         symbol=symbol,
         exchange=exchange,
-        context="GetQuotes",
+        context="GetQuotesOnly",
     )
 
     ltp = float(result.get("lp", 0) or 0)
@@ -258,13 +303,13 @@ def get_market_depth(
     api_exch = _api_exchange(exchange)
     payload = {"uid": uid, "exch": api_exch, "token": token}
 
-    result = _fetch_quote_with_fallback(
+    result = _fetch_quote_getquotes_only(
         payload=payload,
         jkey=jkey,
         expected_token=str(token),
         symbol=symbol,
         exchange=exchange,
-        context="GetMarketDepth",
+        context="GetMarketDepthOnly",
     )
 
     if str(result.get("token")) != str(token):

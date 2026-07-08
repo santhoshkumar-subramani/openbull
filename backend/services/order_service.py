@@ -6,6 +6,7 @@ Dual-entry pattern: place_order_with_auth() + place_order()
 import copy
 import importlib
 import logging
+import asyncio
 from typing import Any
 
 from backend.utils.constants import (
@@ -97,7 +98,6 @@ def place_order_with_auth(
         try:
             from backend.database import async_session
             from backend.services.telegram_alert_service import TelegramAlertService
-            import asyncio
             
             async def _send_live_order_alert():
                 async with async_session() as db_session:
@@ -111,9 +111,21 @@ def place_order_with_auth(
                     )
                     await TelegramAlertService.dispatch_alert(db_session, user_id, alert_msg)
             
-            # Fire and forget if user_id is known (fastapi loop will execute it)
+            # Fire-and-forget on the active loop; if this code runs in a worker
+            # thread, hop to the app's main loop instead of raising RuntimeError.
             if user_id:
-                asyncio.create_task(_send_live_order_alert())
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(_send_live_order_alert())
+                except RuntimeError:
+                    import backend.utils.global_loop as gl
+
+                    if gl.MAIN_LOOP is not None:
+                        asyncio.run_coroutine_threadsafe(_send_live_order_alert(), gl.MAIN_LOOP)
+                    else:
+                        logger.error(
+                            "Failed to trigger live order telegram alert: no running event loop"
+                        )
         except Exception as alert_err:
             logger.error("Failed to trigger live order telegram alert: %s", alert_err)
 
