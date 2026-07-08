@@ -94,10 +94,6 @@ function formatSymbol(symbol: string) {
   return <span>{symbol}</span>;
 }
 
-function isCloseable(p: PositionItem): boolean {
-  return (p.quantity ?? 0) !== 0;
-}
-
 function formatError(err: any): string {
   const detail = err?.response?.data?.detail;
   if (Array.isArray(detail)) {
@@ -247,13 +243,13 @@ export default function GroupedPositions() {
     setRiskDrafts(next);
   }, [groups]);
 
-  const openPositions = useMemo(
-    () => (positions ?? []).filter(isCloseable),
+  const displayPositions = useMemo(
+    () => positions ?? [],
     [positions],
   );
 
-  const { data: livePositions, isLive, isPaused } = useLivePrice(openPositions, {
-    enabled: openPositions.length > 0,
+  const { data: livePositions, isLive, isPaused } = useLivePrice(displayPositions, {
+    enabled: displayPositions.length > 0,
   });
 
   // Mutations
@@ -558,7 +554,7 @@ export default function GroupedPositions() {
                   const groupName = mappingMap.get(key);
 
                   return (
-                    <TableRow key={key} className={i % 2 === 0 ? "bg-muted/30" : ""}>
+                    <TableRow key={key} className={`${i % 2 === 0 ? "bg-muted/30" : ""} ${pos.quantity === 0 ? "opacity-60" : ""}`}>
                       <TableCell className="font-medium">{formatSymbol(pos.symbol)}</TableCell>
                       <TableCell>{pos.exchange}</TableCell>
                       <TableCell>{pos.product}</TableCell>
@@ -620,7 +616,7 @@ export default function GroupedPositions() {
             </Table>
           ) : (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No open positions.
+              No positions.
             </p>
           )}
         </CardContent>
@@ -742,7 +738,7 @@ export default function GroupedPositions() {
                     ) : null}
                   </div>
                   <p className="py-4 text-center text-sm text-muted-foreground">
-                    No open positions in this group.
+                    No positions in this group.
                   </p>
                 </CardContent>
               )}
@@ -876,7 +872,7 @@ export default function GroupedPositions() {
                   {groupPositions.map((pos, i) => {
                     const key = `${pos.symbol}-${pos.exchange}-${pos.product}`;
                     return (
-                      <TableRow key={key} className={i % 2 === 0 ? "bg-muted/30" : ""}>
+                      <TableRow key={key} className={`${i % 2 === 0 ? "bg-muted/30" : ""} ${pos.quantity === 0 ? "opacity-60" : ""}`}>
                         <TableCell className="font-medium">{formatSymbol(pos.symbol)}</TableCell>
                         <TableCell>{pos.exchange}</TableCell>
                         <TableCell>{pos.product}</TableCell>
