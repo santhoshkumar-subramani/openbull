@@ -28,18 +28,22 @@ from backend.models.position_groups import PositionGroup
 from backend.services.order_service import place_order_with_auth
 from backend.services.positions_service import get_positions_with_auth
 from backend.services.trading_mode_service import get_trading_mode
+from backend.services.market_data_cache import get_ltp_value, is_data_fresh
 from backend.strategy.live_auth import resolve_live_auth
 from backend.utils.redis_client import KEY_PREFIX, get_redis
 
 logger = logging.getLogger(__name__)
 
-_POLL_SECONDS = 2.5
+_POLL_SECONDS = 0.5
+_REST_SYNC_SECONDS = 10.0
 _MAX_RETRIES = 20
 _ORDER_DEDUPE_TTL_SECONDS = 8
 _GROUP_CYCLE_LOCK_TTL_SECONDS = 2
 
 _task: Optional[asyncio.Task] = None
 _running: bool = False
+_cached_positions: dict[int, dict[str, dict[str, Any]]] = {}
+_last_rest_sync: dict[int, float] = {}
 
 
 def _position_key(symbol: str, exchange: str, product: str) -> str:
@@ -181,40 +185,79 @@ async def _process_user_groups(
         # End auth-resolution transaction before broker network calls.
         await db.commit()
 
-    ok, payload, _status = await run_in_threadpool(
-        get_positions_with_auth,
-        auth_token,
-        broker,
-        config,
-        user_id,
-    )
-    if not ok:
-        message = payload.get("message", "Failed to fetch positions") if isinstance(payload, dict) else "Failed to fetch positions"
-        for group in groups:
-            if group.risk_status == "closing" or group.risk_force_close_requested:
-                _mark_group_failed(group, message)
-        return
+    import time
+    now = time.time()
+    last_sync = _last_rest_sync.get(user_id, 0)
+    needs_sync = (now - last_sync) >= _REST_SYNC_SECONDS
 
-    positions = payload.get("data") if isinstance(payload, dict) else []
-    if not isinstance(positions, list):
-        positions = []
+    # Force immediate REST sync if any group is actively closing or manual close was requested
+    if any(g.risk_status == "closing" or g.risk_force_close_requested for g in groups):
+        needs_sync = True
 
-    position_map: dict[str, dict[str, Any]] = {}
-    for pos in positions:
-        key = _position_key(
-            str(pos.get("symbol", "")),
-            str(pos.get("exchange", "")),
-            str(pos.get("product", "")),
+    if needs_sync:
+        ok, payload, _status = await run_in_threadpool(
+            get_positions_with_auth,
+            auth_token,
+            broker,
+            config,
+            user_id,
         )
-        if not key or key == "--":
-            continue
-        qty = int(_as_float(pos.get("quantity"), 0.0))
-        if qty == 0:
-            continue
-        position_map[key] = pos
+        if not ok:
+            message = payload.get("message", "Failed to fetch positions") if isinstance(payload, dict) else "Failed to fetch positions"
+            for group in groups:
+                if group.risk_status == "closing" or group.risk_force_close_requested:
+                    _mark_group_failed(group, message)
+            return
+
+        positions = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(positions, list):
+            positions = []
+
+        position_map: dict[str, dict[str, Any]] = {}
+        for pos in positions:
+            key = _position_key(
+                str(pos.get("symbol", "")),
+                str(pos.get("exchange", "")),
+                str(pos.get("product", "")),
+            )
+            if not key or key == "--":
+                continue
+            position_map[key] = pos
+            
+        _cached_positions[user_id] = position_map
+        _last_rest_sync[user_id] = now
+
+    position_map = _cached_positions.get(user_id, {})
+    ws_healthy = is_data_fresh(max_age_seconds=5.0)
 
     for group in groups:
-        await _process_group(db, group, user_id, auth_token, broker, config, position_map)
+        await _process_group(db, group, user_id, auth_token, broker, config, position_map, ws_healthy)
+
+
+def _calculate_live_pnl(pos: dict[str, Any], symbol: str, exchange: str, ws_healthy: bool) -> float:
+    rest_pnl = _as_float(pos.get("pnl"), 0.0)
+    qty = _as_float(pos.get("quantity"), 0.0)
+    
+    if qty == 0 or not ws_healthy:
+        return rest_pnl
+        
+    ltp = get_ltp_value(symbol, exchange)
+    if ltp is None or ltp <= 0:
+        return rest_pnl
+        
+    avg_price = _as_float(pos.get("average_price"), 0.0)
+    if avg_price <= 0:
+        return rest_pnl
+        
+    realized_pnl = _as_float(pos.get("realized_pnl"), 0.0)
+    lot_size = _as_float(pos.get("lot_size") or pos.get("multiplier") or pos.get("ls"), 1.0)
+    
+    if qty > 0:
+        unrealized = (ltp - avg_price) * qty * lot_size
+    else:
+        unrealized = (avg_price - ltp) * abs(qty) * lot_size
+        
+    return realized_pnl + unrealized
 
 
 async def _process_group(
@@ -225,15 +268,18 @@ async def _process_group(
     broker: str,
     config: Optional[dict[str, Any]],
     position_map: dict[str, dict[str, Any]],
+    ws_healthy: bool,
 ) -> None:
     mapped_positions: list[dict[str, Any]] = []
+    group_mtm = 0.0
+    
     for mapping in group.mappings:
         key = _position_key(mapping.symbol, mapping.exchange, mapping.product)
         pos = position_map.get(key)
         if pos is not None:
             mapped_positions.append(pos)
+            group_mtm += _calculate_live_pnl(pos, mapping.symbol, mapping.exchange, ws_healthy)
 
-    group_mtm = sum(_as_float(pos.get("pnl"), 0.0) for pos in mapped_positions)
     group.risk_last_mtm = group_mtm
 
     if group.risk_status == "closing":
