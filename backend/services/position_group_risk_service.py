@@ -366,7 +366,8 @@ async def _attempt_close_cycle(
         return
 
     # Fully flat: finish and disable risk controls.
-    if not mapped_positions:
+    active_positions = [p for p in mapped_positions if int(_as_float(p.get("quantity"), 0.0)) != 0]
+    if not active_positions:
         group.risk_status = "succeeded"
         group.risk_last_error = None
         group.risk_pending_symbols = []
@@ -380,7 +381,7 @@ async def _attempt_close_cycle(
     if retries >= _MAX_RETRIES:
         pending = [
             _position_key(str(p.get("symbol", "")), str(p.get("exchange", "")), str(p.get("product", "")))
-            for p in mapped_positions
+            for p in active_positions
         ]
         _mark_group_failed(
             group,
@@ -390,7 +391,7 @@ async def _attempt_close_cycle(
         return
 
     # Close shorts first (quantity < 0), then longs.
-    ordered = sorted(mapped_positions, key=lambda p: 0 if int(_as_float(p.get("quantity"), 0.0)) < 0 else 1)
+    ordered = sorted(active_positions, key=lambda p: 0 if int(_as_float(p.get("quantity"), 0.0)) < 0 else 1)
 
     attempt_failures = 0
     pending_symbols: list[str] = []
