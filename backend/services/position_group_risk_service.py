@@ -204,6 +204,7 @@ async def _process_user_groups(
             user_id,
         )
         if not ok:
+            _last_rest_sync[user_id] = now
             message = payload.get("message", "Failed to fetch positions") if isinstance(payload, dict) else "Failed to fetch positions"
             for group in groups:
                 if group.risk_status == "closing" or group.risk_force_close_requested:
@@ -231,7 +232,7 @@ async def _process_user_groups(
     position_map = _cached_positions.get(user_id, {})
     ws_healthy = is_data_fresh(max_age_seconds=5.0)
     if not ws_healthy:
-        logger.warning(f"WebSocket data is stale/unhealthy for user {user_id}. Falling back to REST P&L.")
+        logger.debug(f"WebSocket data is stale/unhealthy for user {user_id}. Falling back to REST P&L.")
 
     for group in groups:
         await _process_group(db, group, user_id, auth_token, broker, config, position_map, ws_healthy)
