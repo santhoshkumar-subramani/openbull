@@ -385,8 +385,18 @@ class ShoonyaAdapter(BaseBrokerAdapter):
 
         ltp = float(state.get("lp", 0) or 0)
         close = float(state.get("c", 0) or 0)
+        
+        # Prefer Shoonya's provided percentage change ("pc")
+        pc_str = state.get("pc")
+        if pc_str is not None and str(pc_str).strip() != "":
+            change_pct = float(pc_str)
+            if close == 0 and ltp != 0 and change_pct != 0:
+                # Infer close if we missed the snapshot
+                close = ltp / (1 + (change_pct / 100))
+        else:
+            change_pct = round((ltp - close) / close * 100, 4) if close else 0.0
+            
         change = round(ltp - close, 4) if (ltp and close) else 0.0
-        change_pct = round((ltp - close) / close * 100, 4) if close else 0.0
 
         # Publish LTP.
         ltp_data = {
@@ -438,8 +448,18 @@ class ShoonyaAdapter(BaseBrokerAdapter):
 
         ltp = float(state.get("lp", 0) or 0)
         close = float(state.get("c", 0) or 0)
+        
+        # Prefer Shoonya's provided percentage change ("pc")
+        pc_str = state.get("pc")
+        if pc_str is not None and str(pc_str).strip() != "":
+            change_pct = float(pc_str)
+            if close == 0 and ltp != 0 and change_pct != 0:
+                # Infer close if we missed the snapshot
+                close = ltp / (1 + (change_pct / 100))
+        else:
+            change_pct = round((ltp - close) / close * 100, 4) if close else 0.0
+            
         change = round(ltp - close, 4) if (ltp and close) else 0.0
-        change_pct = round((ltp - close) / close * 100, 4) if close else 0.0
 
         # Also publish LTP and QUOTE for depth subscribers.
         self._process_touchline(data)
