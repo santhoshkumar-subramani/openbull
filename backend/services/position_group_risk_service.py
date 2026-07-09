@@ -287,6 +287,20 @@ async def _process_group(
 
     group.risk_last_mtm = group_mtm
 
+    # If the group has no active positions (qty != 0) but risk controls are still active,
+    # it means the positions were closed (e.g. manually or via slipped auto-close).
+    # We should immediately mark the group as succeeded and disable the triggers.
+    active_positions = [p for p in mapped_positions if int(_as_float(p.get("quantity"), 0.0)) != 0]
+    if _is_risk_enabled(group) and not active_positions:
+        group.risk_status = "succeeded"
+        group.risk_last_error = None
+        group.risk_pending_symbols = []
+        group.risk_retry_count = 0
+        group.risk_force_close_requested = False
+        group.stop_loss_enabled = False
+        group.profit_target_enabled = False
+        return
+
     if group.risk_status == "closing":
         await _attempt_close_cycle(
             group,
@@ -312,9 +326,14 @@ async def _process_group(
 
     if trigger_reason is None:
         if _is_risk_enabled(group):
-            group.risk_status = "monitoring"
+            if group.risk_status != "monitoring":
+                group.risk_status = "monitoring"
+                group.risk_last_error = None
+                group.risk_retry_count = 0
         elif group.risk_status not in {"failed", "succeeded"}:
             group.risk_status = "idle"
+            group.risk_last_error = None
+            group.risk_retry_count = 0
         group.risk_pending_symbols = []
         return
 
@@ -396,6 +415,8 @@ async def _attempt_close_cycle(
     attempt_failures = 0
     pending_symbols: list[str] = []
     group.risk_last_error = None
+    placed_any_order = False
+    
     for pos in ordered:
         symbol = str(pos.get("symbol", ""))
         exchange = str(pos.get("exchange", ""))
@@ -414,6 +435,8 @@ async def _attempt_close_cycle(
         )
         if not close_slot:
             continue
+            
+        placed_any_order = True
 
         action = _close_action(qty)
         order_data = {
@@ -448,7 +471,8 @@ async def _attempt_close_cycle(
             )
 
     group.risk_status = "closing"
-    group.risk_retry_count = retries + 1
+    if placed_any_order:
+        group.risk_retry_count = retries + 1
     group.risk_pending_symbols = pending_symbols
     group.risk_force_close_requested = False
     if attempt_failures > 0:
