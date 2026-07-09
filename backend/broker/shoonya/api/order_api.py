@@ -96,112 +96,121 @@ def _post_raw(endpoint: str, payload: dict, jkey: str) -> tuple:
 
 # ---- Place Order ----
 
+def _apply_market_to_limit_fallback(data: dict, auth_token: str, config: dict | None) -> tuple[dict, dict | None]:
+    """Convert MARKET orders to LIMIT orders with a 5% buffer from current LTP.
+    Returns:
+        (modified_data, error_response_dict)
+    """
+    pricetype = str(data.get("pricetype", "")).upper()
+    if pricetype not in ("MARKET", "MKT"):
+        return data, None
+        
+    try:
+        from backend.broker.shoonya.api.data import get_quotes
+        from backend.services.market_data_cache import get_quote
+        from backend.broker.shoonya.mapping.transform_data import map_product_type
+        
+        exchange = str(data.get("exchange", ""))
+        symbol = str(data.get("symbol", ""))
+        
+        # 1. Try to get LTP and circuits from live websocket cache
+        lc = 0.0
+        uc = 0.0
+        ltp = 0.0
+        price_source = ""
+        
+        live_quote = get_quote(symbol, exchange)
+        if live_quote:
+            ltp = float(live_quote.get("ltp") or 0.0)
+            lc = float(live_quote.get("lower_circuit") or 0.0)
+            uc = float(live_quote.get("upper_circuit") or 0.0)
+            
+        if ltp > 0.0:
+            price_source = "live websocket cache"
+        
+        # 2. Fallback to Shoonya REST API quote (GetQuotesMF primary, GetQuotes backup)
+        if ltp == 0.0:
+            quote = get_quotes(symbol, exchange, auth_token, config)
+            ltp = float(quote.get("lp") or quote.get("ltp") or 0.0)
+            # Shoonya REST quote uses 'lc' and 'uc' or 'lower_circuit'
+            lc = float(quote.get("lc") or quote.get("lower_circuit") or lc)
+            uc = float(quote.get("uc") or quote.get("upper_circuit") or uc)
+            if ltp > 0.0:
+                price_source = "Shoonya REST API quote (MF->GetQuotes fallback)"
+                
+        # 3. Fallback to open position average price (if closing position)
+        if ltp == 0.0:
+            try:
+                shoonya_product = map_product_type(data.get("product", "MIS"))
+                positions_data = _get_cached_positions(auth_token)
+                if positions_data and positions_data.get("status") and positions_data.get("data"):
+                    for pos in positions_data["data"]:
+                        pos_sym = pos.get("tsym", "")
+                        if pos_sym == symbol or (pos.get("exch") == exchange and symbol in pos_sym):
+                            upldprc = float(pos.get("upldprc") or 0.0)
+                            if upldprc > 0.0:
+                                ltp = upldprc
+                                price_source = "open position (upldprc)"
+                            else:
+                                dayavgprc = float(pos.get("dayavgprc") or 0.0)
+                                if dayavgprc > 0.0:
+                                    ltp = dayavgprc
+                                    price_source = "open position (dayavgprc)"
+                                else:
+                                    ltp = float(pos.get("netavgprc") or 0.0)
+                                    price_source = "open position (netavgprc)"
+                            break
+            except Exception as e:
+                logger.warning("Failed to get average price for MARKET order fallback: %s", e)
+
+        if ltp > 0:
+            logger.info("MARKET to LIMIT conversion: LTP %.2f retrieved from %s for %s", ltp, price_source, symbol)
+            action = str(data.get("action", "BUY")).upper()
+            buffer_pct = 0.05
+            if action == "BUY":
+                fallback_price = ltp * (1.0 + buffer_pct)
+            else:
+                fallback_price = ltp * (1.0 - buffer_pct)
+            
+            # Round to nearest 0.05 tick size
+            fallback_price = round(fallback_price / 0.05) * 0.05
+            
+            # Clamp the price within execution range (circuit limits) to prevent exchange rejections
+            if lc > 0.0 and fallback_price < lc:
+                logger.info("Clamping fallback price %.2f to lower circuit %.2f to prevent rejection", fallback_price, lc)
+                fallback_price = lc
+            if uc > 0.0 and fallback_price > uc:
+                logger.info("Clamping fallback price %.2f to upper circuit %.2f to prevent rejection", fallback_price, uc)
+                fallback_price = uc
+            
+            # Make a shallow copy so we don't mutate the caller's dict unexpectedly
+            data = data.copy()
+            data["pricetype"] = "LIMIT"
+            data["price"] = round(fallback_price, 2)
+            logger.info("Shoonya Market Order Fallback: %s %s converted to LIMIT at %.2f (LTP %.2f)", action, symbol, fallback_price, ltp)
+            return data, None
+        else:
+            logger.error("Market to Limit Conversion failed for %s. LTP is 0.0.", symbol)
+            return data, {
+                "status": "error", 
+                "message": f"Order Rejected: Failed to fetch valid LTP for MARKET to LIMIT conversion for {symbol}."
+            }
+    except Exception as e:
+        logger.warning("Shoonya MARKET order fallback failed to get quote for %s: %s", data.get("symbol"), e)
+        return data, {
+            "status": "error", 
+            "message": f"Order Rejected: Error during MARKET to LIMIT conversion for {data.get('symbol')}."
+        }
+
 def place_order_api(data: dict, auth_token: str, config: dict | None = None) -> tuple:
     """Place an order on Shoonya.
 
     Returns:
         (response, response_data, order_id)
     """
-    # Shoonya officially blocks MARKET orders for options/MCX. We intercept
-    # and convert them to a LIMIT order with a 5% buffer from current LTP.
-    exchange = str(data.get("exchange", ""))
-    pricetype = str(data.get("pricetype", ""))
-    
-    if exchange in ("NFO", "BFO", "MCX") and pricetype == "MARKET":
-        try:
-            from backend.broker.shoonya.api.data import get_quotes
-            from backend.services.market_data_cache import get_ltp_value, get_quote
-            from backend.broker.shoonya.mapping.transform_data import map_product_type
-            
-            symbol = str(data.get("symbol", ""))
-            
-            # 1. Try to get LTP and circuits from live websocket cache
-            lc = 0.0
-            uc = 0.0
-            ltp = 0.0
-            price_source = ""
-            
-            live_quote = get_quote(symbol, exchange)
-            if live_quote:
-                ltp = float(live_quote.get("ltp") or 0.0)
-                lc = float(live_quote.get("lower_circuit") or 0.0)
-                uc = float(live_quote.get("upper_circuit") or 0.0)
-                
-            if ltp > 0.0:
-                price_source = "live websocket cache"
-            
-            # 2. Fallback to Shoonya REST API quote (GetQuotesMF primary, GetQuotes backup)
-            if ltp == 0.0:
-                quote = get_quotes(symbol, exchange, auth_token, config)
-                ltp = float(quote.get("lp") or quote.get("ltp") or 0.0)
-                # Shoonya REST quote uses 'lc' and 'uc' or 'lower_circuit'
-                lc = float(quote.get("lc") or quote.get("lower_circuit") or lc)
-                uc = float(quote.get("uc") or quote.get("upper_circuit") or uc)
-                if ltp > 0.0:
-                    price_source = "Shoonya REST API quote (MF->GetQuotes fallback)"
-                    
-            # 3. Fallback to open position average price (if closing position)
-            if ltp == 0.0:
-                try:
-                    shoonya_product = map_product_type(data.get("product", "MIS"))
-                    positions_data = _get_cached_positions(auth_token)
-                    if positions_data and positions_data.get("status") and positions_data.get("data"):
-                        for pos in positions_data["data"]:
-                            pos_sym = pos.get("tsym", "")
-                            if pos_sym == symbol or (pos.get("exch") == exchange and symbol in pos_sym):
-                                upldprc = float(pos.get("upldprc") or 0.0)
-                                if upldprc > 0.0:
-                                    ltp = upldprc
-                                    price_source = "open position (upldprc)"
-                                else:
-                                    dayavgprc = float(pos.get("dayavgprc") or 0.0)
-                                    if dayavgprc > 0.0:
-                                        ltp = dayavgprc
-                                        price_source = "open position (dayavgprc)"
-                                    else:
-                                        ltp = float(pos.get("netavgprc") or 0.0)
-                                        price_source = "open position (netavgprc)"
-                                break
-                except Exception as e:
-                    logger.warning("Failed to get average price for MARKET order fallback: %s", e)
-
-            if ltp > 0:
-                logger.info("MARKET to LIMIT conversion: LTP %.2f retrieved from %s for %s", ltp, price_source, symbol)
-                action = str(data.get("action", "BUY")).upper()
-                buffer_pct = 0.05
-                if action == "BUY":
-                    fallback_price = ltp * (1.0 + buffer_pct)
-                else:
-                    fallback_price = ltp * (1.0 - buffer_pct)
-                
-                # Round to nearest 0.05 tick size
-                fallback_price = round(fallback_price / 0.05) * 0.05
-                
-                # Clamp the price within execution range (circuit limits) to prevent exchange rejections
-                if lc > 0.0 and fallback_price < lc:
-                    logger.info("Clamping fallback price %.2f to lower circuit %.2f to prevent rejection", fallback_price, lc)
-                    fallback_price = lc
-                if uc > 0.0 and fallback_price > uc:
-                    logger.info("Clamping fallback price %.2f to upper circuit %.2f to prevent rejection", fallback_price, uc)
-                    fallback_price = uc
-                
-                # Make a shallow copy so we don't mutate the caller's dict unexpectedly
-                data = data.copy()
-                data["pricetype"] = "LIMIT"
-                data["price"] = round(fallback_price, 2)
-                logger.info("Shoonya Market Order Fallback: %s %s converted to LIMIT at %.2f (LTP %.2f)", action, symbol, fallback_price, ltp)
-            else:
-                logger.error("Market to Limit Conversion failed for %s. LTP is 0.0.", symbol)
-                return None, {
-                    "status": "error", 
-                    "message": f"Order Rejected: Failed to fetch valid LTP for MARKET to LIMIT conversion for {symbol}."
-                }, None
-        except Exception as e:
-            logger.warning("Shoonya MARKET order fallback failed to get quote for %s: %s", data.get("symbol"), e)
-            return None, {
-                "status": "error", 
-                "message": f"Order Rejected: Error during MARKET to LIMIT conversion for {symbol}."
-            }, None
+    data, error_resp = _apply_market_to_limit_fallback(data, auth_token, config)
+    if error_resp:
+        return None, error_resp, None
 
     uid, jkey, actid = _split_token(auth_token)
 
@@ -296,6 +305,10 @@ def place_smartorder_api(data: dict, auth_token: str) -> tuple:
 
 def modify_order(data: dict, auth_token: str, config: dict | None = None) -> tuple[dict, int]:
     """Modify an existing order."""
+    data, error_resp = _apply_market_to_limit_fallback(data, auth_token, config)
+    if error_resp:
+        return error_resp, 400
+        
     uid, jkey, actid = _split_token(auth_token)
 
     payload = transform_modify_order_data(data, "")
