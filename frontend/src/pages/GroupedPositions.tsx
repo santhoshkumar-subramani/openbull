@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CirclePlus, Trash2, ChevronDown, ChevronRight, Edit2, TrendingDown, TrendingUp, ShieldCheck, ShieldAlert } from "lucide-react";
+import { CirclePlus, Trash2, ChevronDown, ChevronRight, Edit2, ShieldAlert } from "lucide-react";
 
 import { getPositions } from "@/api/dashboard";
 import {
@@ -171,6 +171,7 @@ export default function GroupedPositions() {
 
   // State for confirming group deletion
   const [groupToDelete, setGroupToDelete] = useState<PositionGroup | null>(null);
+  const [groupToCloseNow, setGroupToCloseNow] = useState<PositionGroup | null>(null);
 
   // Folded state for tables
   const [foldedState, setFoldedState] = useState<Record<string, boolean>>({});
@@ -630,137 +631,26 @@ export default function GroupedPositions() {
           assignedKeys.has(`${pos.symbol}-${pos.exchange}-${pos.product}`)
         );
 
-        if (groupPositions.length === 0) {
-           return (
-            <Card key={group.id}>
-              <CardHeader 
-                className="cursor-pointer select-none flex flex-row items-start justify-between space-y-0 pb-4 transition-colors hover:bg-muted/30"
-                onClick={() => toggleFold(group.id.toString())}
-              >
-                <div className="flex flex-col gap-1.5">
-                  <CardTitle className="flex items-center gap-2">
-                    {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
-                    {group.name}
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={(e) => { e.stopPropagation(); setGroupToRename(group); setRenameGroupName(group.name); }} 
-                      className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-500 dark:hover:bg-blue-950/50 ml-2"
-                      title="Rename Group"
-                    >
-                      <span className="sr-only">Rename Group</span>
-                      <Edit2 className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={(e) => { e.stopPropagation(); setGroupToDelete(group); }} 
-                      className="h-8 w-8 p-0 text-red-600 hover:bg-red-100 hover:text-red-700 dark:text-red-500 dark:hover:bg-red-950/50 ml-2"
-                      title="Delete Group"
-                    >
-                      <span className="sr-only">Delete Group</span>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </CardTitle>
-                  <CardDescription>Empty Strategy Group</CardDescription>
-                </div>
-                <div className="text-right" onClick={(e) => e.stopPropagation()}>
-                  <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
-                  <p className="text-xl font-bold text-muted-foreground">0.00</p>
-                </div>
-              </CardHeader>
-              {!foldedState[group.id.toString()] && (
-                <CardContent>
-                  <div className="mb-4 rounded-md border p-4 bg-card/50">
-                    <div className="mb-4 flex items-center justify-between gap-2 border-b pb-3">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="h-5 w-5 text-primary" />
-                        <h3 className="font-semibold text-sm">Auto Risk Controls</h3>
-                        <Badge variant={riskStatusTone(group.risk_status)}>{group.risk_status}</Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setEditRiskGroupId(group.id); }}>
-                          <Edit2 className="h-4 w-4 mr-2" />
-                          Modify
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => closeNowMutation.mutate(group.id)}
-                          disabled={closingNowGroupId === group.id}
-                        >
-                          {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    <div className="grid gap-6 sm:grid-cols-2">
-                      <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.stop_loss_enabled ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-muted text-muted-foreground'}`}>
-                          <TrendingDown className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground font-medium">Stop Loss</p>
-                          <p className="text-sm font-semibold">
-                            {group.stop_loss_enabled && group.stop_loss_mtm != null ? `₹${group.stop_loss_mtm}` : "Disabled"}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.profit_target_enabled ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-muted text-muted-foreground'}`}>
-                          <TrendingUp className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground font-medium">Profit Target</p>
-                          <p className="text-sm font-semibold">
-                            {group.profit_target_enabled && group.profit_target_mtm != null ? `₹${group.profit_target_mtm}` : "Disabled"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {group.risk_last_error ? (
-                      <div className="mt-4 flex items-start gap-2 text-sm text-red-600 dark:text-red-400 rounded-md bg-red-50 dark:bg-red-950/20 p-2.5">
-                        <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
-                        <div className="flex-1">
-                          <p className="font-medium">Trigger Failed</p>
-                          <p className="text-xs opacity-90">{group.risk_last_error} (Retry: {group.risk_retry_count}/20)</p>
-                        </div>
-                      </div>
-                    ) : group.risk_retry_count > 0 ? (
-                      <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-                        <span>Retry attempts: {group.risk_retry_count} / 20</span>
-                      </div>
-                    ) : null}
-                  </div>
-                  <p className="py-4 text-center text-sm text-muted-foreground">
-                    No positions in this group.
-                  </p>
-                </CardContent>
-              )}
-            </Card>
-           )
-        }
-
-        const groupPnl = groupPositions.reduce((acc, pos) => acc + pos.pnl, 0);
+        const isEmpty = groupPositions.length === 0;
+        const groupPnl = isEmpty ? 0 : groupPositions.reduce((acc, pos) => acc + pos.pnl, 0);
+        const description = isEmpty ? "Empty Strategy Group" : `${groupPositions.length} position${groupPositions.length !== 1 ? 's' : ''}`;
 
         return (
           <Card key={group.id}>
             <CardHeader 
-              className="cursor-pointer select-none flex flex-row items-start justify-between space-y-0 pb-4 transition-colors hover:bg-muted/30"
+              className="cursor-pointer select-none flex flex-col lg:flex-row lg:items-center justify-between space-y-4 lg:space-y-0 pb-4 transition-colors hover:bg-muted/30"
               onClick={() => toggleFold(group.id.toString())}
             >
-              <div className="flex flex-col gap-1.5">
-                <CardTitle className="flex items-center gap-2">
+              <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                <CardTitle className="flex items-center gap-2 truncate">
                   {foldedState[group.id.toString()] ? <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />}
-                  {group.name}
-                  <Badge variant={riskStatusTone(group.risk_status)}>{group.risk_status}</Badge>
+                  <span className="truncate">{group.name}</span>
+                  <Badge variant={riskStatusTone(group.risk_status)} className="shrink-0">{group.risk_status}</Badge>
                   <Button 
                     variant="ghost" 
                     size="sm" 
                     onClick={(e) => { e.stopPropagation(); setGroupToRename(group); setRenameGroupName(group.name); }} 
-                    className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-500 dark:hover:bg-blue-950/50 ml-2"
+                    className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-500 dark:hover:bg-blue-950/50 shrink-0 ml-1"
                     title="Rename Group"
                   >
                     <span className="sr-only">Rename Group</span>
@@ -770,135 +660,121 @@ export default function GroupedPositions() {
                     variant="ghost" 
                     size="sm" 
                     onClick={(e) => { e.stopPropagation(); setGroupToDelete(group); }} 
-                    className="h-8 w-8 p-0 text-red-600 hover:bg-red-100 hover:text-red-700 dark:text-red-500 dark:hover:bg-red-950/50 ml-2"
+                    className="h-8 w-8 p-0 text-red-600 hover:bg-red-100 hover:text-red-700 dark:text-red-500 dark:hover:bg-red-950/50 shrink-0"
                     title="Delete Group"
                   >
                     <span className="sr-only">Delete Group</span>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </CardTitle>
-                <CardDescription>{groupPositions.length} position{groupPositions.length !== 1 ? 's' : ''}</CardDescription>
+                <CardDescription className="ml-7">{description}</CardDescription>
               </div>
-              <div className="text-right" onClick={(e) => e.stopPropagation()}>
-                <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
-                <p className={`text-xl font-bold ${getPnlColor(groupPnl)}`}>
-                  {groupPnl >= 0 ? "+" : ""}
-                  {groupPnl.toFixed(2)}
-                </p>
+
+              {/* Redesigned Risk Controls in Header */}
+              <div className="flex items-center gap-4 flex-wrap lg:flex-nowrap" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center bg-muted/30 rounded-lg p-1.5 border gap-3 shrink-0">
+                  <div className="flex flex-col items-end pl-2">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground leading-tight">SL</span>
+                    <span className={`text-sm font-semibold leading-tight ${group.stop_loss_enabled ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                      {group.stop_loss_enabled && group.stop_loss_mtm != null ? `₹${group.stop_loss_mtm}` : "Off"}
+                    </span>
+                  </div>
+                  <div className="w-px h-7 bg-border" />
+                  <div className="flex flex-col items-start pr-1">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground leading-tight">Target</span>
+                    <span className={`text-sm font-semibold leading-tight ${group.profit_target_enabled ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}>
+                      {group.profit_target_enabled && group.profit_target_mtm != null ? `₹${group.profit_target_mtm}` : "Off"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 border-l pl-2 ml-1">
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); setEditRiskGroupId(group.id); }} title="Modify Risk Controls">
+                      <Edit2 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-100 dark:text-red-500 dark:hover:bg-red-950/50" onClick={(e) => { e.stopPropagation(); setGroupToCloseNow(group); }} disabled={closingNowGroupId === group.id} title="Close Group Now">
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="text-right min-w-[100px] shrink-0">
+                  <p className="text-sm font-medium text-muted-foreground">Group P&L</p>
+                  <p className={`text-xl font-bold ${getPnlColor(groupPnl)}`}>
+                    {groupPnl >= 0 ? "+" : ""}
+                    {groupPnl.toFixed(2)}
+                  </p>
+                </div>
               </div>
             </CardHeader>
+            
             {!foldedState[group.id.toString()] && (
               <CardContent>
-                <div className="mb-4 rounded-md border p-4 bg-card/50">
-                  <div className="mb-4 flex items-center justify-between gap-2 border-b pb-3">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="h-5 w-5 text-primary" />
-                      <h3 className="font-semibold text-sm">Auto Risk Controls</h3>
-                      <Badge variant={riskStatusTone(group.risk_status)}>{group.risk_status}</Badge>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setEditRiskGroupId(group.id); }}>
-                        <Edit2 className="h-4 w-4 mr-2" />
-                        Modify
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => closeNowMutation.mutate(group.id)}
-                        disabled={closingNowGroupId === group.id}
-                      >
-                        {closingNowGroupId === group.id ? "Requesting..." : "Close Group Now"}
-                      </Button>
+                {group.risk_last_error ? (
+                  <div className="mb-4 flex items-start gap-2 text-sm text-red-600 dark:text-red-400 rounded-md bg-red-50 dark:bg-red-950/20 p-2.5">
+                    <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="font-medium">Trigger Failed</p>
+                      <p className="text-xs opacity-90">{group.risk_last_error} (Retry: {group.risk_retry_count}/20)</p>
                     </div>
                   </div>
-                  
-                  <div className="grid gap-6 sm:grid-cols-2">
-                    <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.stop_loss_enabled ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-muted text-muted-foreground'}`}>
-                        <TrendingDown className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">Stop Loss</p>
-                        <p className="text-sm font-semibold">
-                          {group.stop_loss_enabled && group.stop_loss_mtm != null ? `₹${group.stop_loss_mtm}` : "Disabled"}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${group.profit_target_enabled ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-muted text-muted-foreground'}`}>
-                        <TrendingUp className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">Profit Target</p>
-                        <p className="text-sm font-semibold">
-                          {group.profit_target_enabled && group.profit_target_mtm != null ? `₹${group.profit_target_mtm}` : "Disabled"}
-                        </p>
-                      </div>
-                    </div>
+                ) : group.risk_retry_count > 0 ? (
+                  <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Retry attempts: {group.risk_retry_count} / 20</span>
                   </div>
-                  
-                  {group.risk_last_error ? (
-                    <div className="mt-4 flex items-start gap-2 text-sm text-red-600 dark:text-red-400 rounded-md bg-red-50 dark:bg-red-950/20 p-2.5">
-                      <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
-                      <div className="flex-1">
-                        <p className="font-medium">Trigger Failed</p>
-                        <p className="text-xs opacity-90">{group.risk_last_error} (Retry: {group.risk_retry_count}/20)</p>
-                      </div>
-                    </div>
-                  ) : group.risk_retry_count > 0 ? (
-                    <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Retry attempts: {group.risk_retry_count} / 20</span>
-                    </div>
-                  ) : null}
-                </div>
-                <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Symbol</TableHead>
-                    <TableHead>Exchange</TableHead>
-                    <TableHead>Product</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Avg Price</TableHead>
-                    <TableHead className="text-right">LTP</TableHead>
-                    <TableHead className="text-right">P&L</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {groupPositions.map((pos, i) => {
-                    const key = `${pos.symbol}-${pos.exchange}-${pos.product}`;
-                    return (
-                      <TableRow key={key} className={`${i % 2 === 0 ? "bg-muted/30" : ""} ${pos.quantity === 0 ? "opacity-60" : ""}`}>
-                        <TableCell className="font-medium">{formatSymbol(pos.symbol)}</TableCell>
-                        <TableCell>{pos.exchange}</TableCell>
-                        <TableCell>{pos.product}</TableCell>
-                        <TableCell className="text-right">{pos.quantity}</TableCell>
-                        <TableCell className="text-right">{pos.average_price.toFixed(2)}</TableCell>
-                        <TableCell className="text-right">{pos.ltp.toFixed(2)}</TableCell>
-                        <TableCell className={`text-right font-medium ${getPnlColor(pos.pnl)}`}>
-                          {pos.pnl >= 0 ? "+" : ""}
-                          {pos.pnl.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => unassignMutation.mutate(pos)}
-                            className="h-8 w-8 p-0 text-red-600 hover:bg-red-100 hover:text-red-700 dark:text-red-500 dark:hover:bg-red-950/50"
-                            title="Remove from group"
-                          >
-                            <span className="sr-only">Remove</span>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+                ) : null}
+
+                {isEmpty ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    No positions in this group.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Symbol</TableHead>
+                        <TableHead>Exchange</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Avg Price</TableHead>
+                        <TableHead className="text-right">LTP</TableHead>
+                        <TableHead className="text-right">P&L</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </CardContent>
-          )}
+                    </TableHeader>
+                    <TableBody>
+                      {groupPositions.map((pos, i) => {
+                        const key = `${pos.symbol}-${pos.exchange}-${pos.product}`;
+                        return (
+                          <TableRow key={key} className={`${i % 2 === 0 ? "bg-muted/30" : ""} ${pos.quantity === 0 ? "opacity-60" : ""}`}>
+                            <TableCell className="font-medium">{formatSymbol(pos.symbol)}</TableCell>
+                            <TableCell>{pos.exchange}</TableCell>
+                            <TableCell>{pos.product}</TableCell>
+                            <TableCell className="text-right">{pos.quantity}</TableCell>
+                            <TableCell className="text-right">{pos.average_price.toFixed(2)}</TableCell>
+                            <TableCell className="text-right">{pos.ltp.toFixed(2)}</TableCell>
+                            <TableCell className={`text-right font-medium ${getPnlColor(pos.pnl)}`}>
+                              {pos.pnl >= 0 ? "+" : ""}
+                              {pos.pnl.toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => unassignMutation.mutate(pos)}
+                                className="h-8 w-8 p-0 text-red-600 hover:bg-red-100 hover:text-red-700 dark:text-red-500 dark:hover:bg-red-950/50"
+                                title="Remove from group"
+                              >
+                                <span className="sr-only">Remove</span>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            )}
           </Card>
         );
       })}
@@ -962,6 +838,33 @@ export default function GroupedPositions() {
         onConfirm={() => {
           if (groupToDelete) {
             deleteGroupMutation.mutate(groupToDelete.id);
+          }
+        }}
+      />
+
+      {/* Close Group Now Dialog */}
+      <ConfirmDialog
+        open={groupToCloseNow !== null}
+        onOpenChange={(o) => {
+          if (!o && closingNowGroupId !== groupToCloseNow?.id) {
+            setGroupToCloseNow(null);
+          }
+        }}
+        title="Close All Positions in Group"
+        description={
+          <>
+            Are you sure you want to immediately close all open positions in{" "}
+            <strong>{groupToCloseNow?.name}</strong>? This action cannot be undone and will fire market orders immediately.
+          </>
+        }
+        confirmLabel="Close Group Now"
+        cancelLabel="Cancel"
+        variant="destructive"
+        loading={closingNowGroupId === groupToCloseNow?.id}
+        onConfirm={() => {
+          if (groupToCloseNow) {
+            closeNowMutation.mutate(groupToCloseNow.id);
+            setGroupToCloseNow(null); // The mutation handles the loading state via closingNowGroupId
           }
         }}
       />
