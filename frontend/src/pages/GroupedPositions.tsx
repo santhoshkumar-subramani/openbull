@@ -223,25 +223,22 @@ export default function GroupedPositions() {
 
   useEffect(() => {
     if (!groups) return;
-    const next: Record<
-      number,
-      {
-        stopLossEnabled: boolean;
-        stopLossMtm: string;
-        profitEnabled: boolean;
-        profitMtm: string;
+    setRiskDrafts((prev) => {
+      const next = { ...prev };
+      for (const g of groups) {
+        // Only overwrite the draft if the user isn't currently editing it
+        if (editRiskGroupId !== g.id) {
+          next[g.id] = {
+            stopLossEnabled: !!g.stop_loss_enabled,
+            stopLossMtm: g.stop_loss_mtm != null ? String(g.stop_loss_mtm) : "",
+            profitEnabled: !!g.profit_target_enabled,
+            profitMtm: g.profit_target_mtm != null ? String(g.profit_target_mtm) : "",
+          };
+        }
       }
-    > = {};
-    for (const g of groups) {
-      next[g.id] = {
-        stopLossEnabled: !!g.stop_loss_enabled,
-        stopLossMtm: g.stop_loss_mtm != null ? String(g.stop_loss_mtm) : "",
-        profitEnabled: !!g.profit_target_enabled,
-        profitMtm: g.profit_target_mtm != null ? String(g.profit_target_mtm) : "",
-      };
-    }
-    setRiskDrafts(next);
-  }, [groups]);
+      return next;
+    });
+  }, [groups, editRiskGroupId]);
 
   const displayPositions = useMemo(
     () => positions ?? [],
