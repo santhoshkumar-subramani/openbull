@@ -31,6 +31,7 @@ async def get_position_groups(
         select(PositionGroup)
         .options(selectinload(PositionGroup.mappings))
         .where(PositionGroup.user_id == current_user.id)
+        .order_by(PositionGroup.id)
     )
     groups = result.scalars().all()
     return groups
