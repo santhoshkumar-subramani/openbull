@@ -291,7 +291,7 @@ async def _process_group(
     # it means the positions were closed (e.g. manually or via slipped auto-close).
     # We should immediately mark the group as succeeded and disable the triggers.
     active_positions = [p for p in mapped_positions if int(_as_float(p.get("quantity"), 0.0)) != 0]
-    if _is_risk_enabled(group) and not active_positions:
+    if _is_risk_enabled(group) and len(mapped_positions) > 0 and not active_positions:
         group.risk_status = "succeeded"
         group.risk_last_error = None
         group.risk_pending_symbols = []
@@ -386,7 +386,7 @@ async def _attempt_close_cycle(
 
     # Fully flat: finish and disable risk controls.
     active_positions = [p for p in mapped_positions if int(_as_float(p.get("quantity"), 0.0)) != 0]
-    if not active_positions:
+    if len(mapped_positions) > 0 and not active_positions:
         group.risk_status = "succeeded"
         group.risk_last_error = None
         group.risk_pending_symbols = []
